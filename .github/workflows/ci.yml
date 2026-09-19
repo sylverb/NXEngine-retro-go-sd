@@ -1,0 +1,124 @@
+name: Build
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - main
+
+# Cancel superseded runs on the same ref (keeps PR feedback fast).
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Keep in sync with Makefile RELEASE_VERSION / firmware DOCKER_IMAGE.
+  DOCKER_IMAGE: sylverb/retro-go-sd-builder:v1.5
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      project_kind: ${{ steps.meta.outputs.project_kind }}
+      packed_bin: ${{ steps.meta.outputs.packed_bin }}
+      target_elf: ${{ steps.meta.outputs.target_elf }}
+      target_map: ${{ steps.meta.outputs.target_map }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          # Full history + tags so `git describe --tags --dirty` works for CORE_VERSION.
+          fetch-depth: 0
+
+      - name: Read project metadata
+        id: meta
+        run: |
+          set -euo pipefail
+          PROJECT_KIND="$(make --no-print-directory -f Makefile print-PROJECT_KIND)"
+          PACKED_BIN="$(make --no-print-directory -f Makefile print-PACKED_BIN)"
+          TARGET_ELF="$(make --no-print-directory -f Makefile print-TARGET_ELF)"
+          TARGET_MAP="$(make --no-print-directory -f Makefile print-TARGET_MAP)"
+          echo "project_kind=${PROJECT_KIND}" >> "${GITHUB_OUTPUT}"
+          echo "packed_bin=${PACKED_BIN}" >> "${GITHUB_OUTPUT}"
+          echo "target_elf=${TARGET_ELF}" >> "${GITHUB_OUTPUT}"
+          echo "target_map=${TARGET_MAP}" >> "${GITHUB_OUTPUT}"
+          echo "PROJECT_KIND=${PROJECT_KIND}"
+          echo "PACKED_BIN=${PACKED_BIN}"
+          echo "TARGET_ELF=${TARGET_ELF}"
+          echo "TARGET_MAP=${TARGET_MAP}"
+
+      - name: Build (Docker)
+        run: |
+          docker run --rm --user "$(id -u):$(id -g)" \
+            -v "${{ github.workspace }}:/opt/workdir" \
+            -w /opt/workdir \
+            "${{ env.DOCKER_IMAGE }}" \
+            make --no-print-directory -j"$(nproc)" all
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-artifacts
+          path: |
+            ${{ steps.meta.outputs.packed_bin }}
+            ${{ steps.meta.outputs.target_elf }}
+            ${{ steps.meta.outputs.target_map }}
+          if-no-files-found: error
+
+  release:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          # Full history + tags so `git describe --tags --dirty` works for CORE_VERSION.
+          fetch-depth: 0
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build-artifacts
+          path: dist
+
+      - name: Stage release assets
+        run: |
+          set -euo pipefail
+          PACKED_BIN="${{ needs.build.outputs.packed_bin }}"
+          TARGET_ELF="${{ needs.build.outputs.target_elf }}"
+          TARGET_MAP="${{ needs.build.outputs.target_map }}"
+          # Artifact download preserves relative paths under dist/.
+          python3 scripts/stage_release.py \
+            --bin "dist/${PACKED_BIN}" \
+            --elf "dist/${TARGET_ELF}" \
+            --map "dist/${TARGET_MAP}" \
+            --tag "${GITHUB_REF_NAME}" \
+            --out release \
+            --docker-image "${{ env.DOCKER_IMAGE }}"
+
+      - name: Create GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          mapfile -t names < release/release-files.txt
+          files=()
+          for name in "${names[@]}"; do
+            files+=("release/${name}")
+          done
+          gh release create "${TAG}" \
+            --title "${TAG}" \
+            --notes-file release/RELEASE_NOTES.md \
+            "${files[@]}"

@@ -1,0 +1,2 @@
+# Needed by sdk/tools/pack_core.py when packaging --pad-logo / --header-logo images.
+pillow
