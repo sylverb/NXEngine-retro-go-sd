@@ -15,7 +15,7 @@ HOST_CC    ?= cc
 HOST_BUILD_DIR := build/host/$(PROJECT_KIND)_sdl$(HOST_SDL)
 
 ifeq ($(PROJECT_KIND),homebrew)
-HOST_BIN := ExampleHB_host
+HOST_BIN := CaveStory_host
 else
 HOST_BIN := $(CORE_NAME)_host
 endif
@@ -50,6 +50,8 @@ HOST_DEFS := \
 HOST_INCLUDES := \
 	-Ihost \
 	-Ihost/stubs \
+	-Isrc \
+	-Ithird_party/nxengine \
 	-I$(GNW_CORE_SDK)/src \
 	-I$(HOST_INC_ROOT)/Core/Inc \
 	-I$(HOST_INC_ROOT)/Core/Inc/retro-go \
@@ -60,10 +62,15 @@ HOST_INCLUDES := \
 
 HOST_CFLAGS := -O2 -g -Wall -Wextra -std=c11 \
 	-include host/stubs/config.h \
-	$(HOST_DEFS) $(HOST_INCLUDES)
+	$(HOST_DEFS) $(HOST_INCLUDES) \
+	-Isrc \
+	-Ithird_party/nxengine \
+	$(CORE_C_DEFS)
 
+# Device-only SDL shim must not override host SDL2/3 headers.
+HOST_CORE_SRCS := $(filter-out src/platform/sdl_gw.c,$(CORE_C_SOURCES))
 HOST_SRCS := \
-	$(CORE_C_SOURCES) \
+	$(HOST_CORE_SRCS) \
 	host/crc32.c \
 	host/host_main.c \
 	host/host_platform.c \

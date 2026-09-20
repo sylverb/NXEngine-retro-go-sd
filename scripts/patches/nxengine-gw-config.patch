@@ -1,0 +1,26 @@
+--- /tmp/config.h.orig	2026-09-19 22:39:56
++++ config.h	2026-09-19 22:39:56
+@@ -2,18 +2,11 @@
+ #ifndef _CONFIG_H
+ #define _CONFIG_H
+ 
+-// if set graphics scaling factor is changable at runtime (otherwise it's a #define)
+-#define CONFIG_MUTABLE_SCALE
++/* G&W Retro-Go SD: fixed scale, bitmap fonts, no in-binary extractor. */
+ 
+-// SDL_ttf support. if turned off SDL_ttf will not be required but only
+-// bitmap fonts will be supported.
+-#define CONFIG_ENABLE_TTF
++/* #define CONFIG_MUTABLE_SCALE */
++/* #define CONFIG_ENABLE_TTF */
++/* #define CONFIG_DATA_EXTRACTOR */
++/* #define CONFIG_OPENGL */
+ 
+-// include the Doukutsu data-file extractor in the build
+-// (it's needed only the first time the program is run).
+-#define CONFIG_DATA_EXTRACTOR
+-
+-// do image scaling in hardware via OpenGL
+-//#define CONFIG_OPENGL
+-
+ #endif

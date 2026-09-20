@@ -298,6 +298,16 @@ void lcd_set_refresh_rate(uint32_t frequency)
         lcd_refresh_hz = frequency;
 }
 
+uint32_t lcd_is_swap_pending(void)
+{
+    return 0;
+}
+
+bool lcd_sleep_while_swap_pending(void)
+{
+    return false;
+}
+
 uint32_t lcd_get_last_refresh_rate(void)
 {
     return lcd_refresh_hz;
@@ -619,12 +629,67 @@ void odroid_overlay_alert(const char *text) { (void)text; }
 uint8_t *odroid_overlay_cache_file_in_flash(const char *file_path, uint32_t *file_size_p,
                                             bool byte_swap)
 {
-    (void)file_path;
+    static uint8_t *blob;
+    static size_t blob_cap;
+    FILE *f;
+    long sz;
+
     (void)byte_swap;
     if (file_size_p)
         *file_size_p = 0;
-    return NULL;
+    if (!file_path)
+        return NULL;
+
+    f = fopen(file_path, "rb");
+    if (!f) {
+        /* Map device SD paths onto local CaveStory tree. */
+        const char *prefix = "/homebrews/";
+        if (strncmp(file_path, prefix, strlen(prefix)) == 0) {
+            char local[512];
+            snprintf(local, sizeof(local), "CaveStory/%s", file_path + strlen(prefix));
+            f = fopen(local, "rb");
+            if (!f) {
+                snprintf(local, sizeof(local), "%s", file_path + strlen(prefix));
+                f = fopen(local, "rb");
+            }
+        }
+    }
+    if (!f)
+        return NULL;
+    if (fseek(f, 0, SEEK_END) != 0) {
+        fclose(f);
+        return NULL;
+    }
+    sz = ftell(f);
+    if (sz <= 0) {
+        fclose(f);
+        return NULL;
+    }
+    rewind(f);
+    if ((size_t)sz > blob_cap) {
+        free(blob);
+        blob = (uint8_t *)malloc((size_t)sz);
+        blob_cap = blob ? (size_t)sz : 0;
+    }
+    if (!blob) {
+        fclose(f);
+        return NULL;
+    }
+    if (fread(blob, 1, (size_t)sz, f) != (size_t)sz) {
+        fclose(f);
+        return NULL;
+    }
+    fclose(f);
+    if (file_size_p)
+        *file_size_p = (uint32_t)sz;
+    return blob;
 }
+
+void odroid_overlay_draw_progress_bar(const char *header, uint8_t progress)
+{
+    printf("progress: %s %u%%\n", header ? header : "", (unsigned)progress);
+}
+
 
 size_t odroid_overlay_cache_file_in_ram(const char *file_path, uint8_t *dest_address)
 {

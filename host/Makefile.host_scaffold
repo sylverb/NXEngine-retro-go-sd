@@ -1,0 +1,12 @@
+# Thin wrapper so `make -f host/Makefile.host_scaffold` works from repo root.
+# Includes the original host/Makefile.host rules with project variables.
+
+PROJECT_KIND ?= homebrew
+CORE_NAME ?= cavestory
+CORE_C_SOURCES ?= src/main.c src/platform/gw_flash_assets.c
+CORE_C_DEFS ?= -DPROJECT_KIND_HOMEBREW=1 -D_320X240=1 -DNXENGINE_GW=1
+GNW_CORE_SDK ?= sdk
+V ?= @
+ECHO ?= echo
+
+include host/Makefile.host

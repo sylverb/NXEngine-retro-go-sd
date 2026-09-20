@@ -36,12 +36,17 @@
 #include <cstddef>
 #include <cstring>
 #include <cstdio>
+#include <cstdlib>
+#include <cstdint>
 #ifndef HOST_BUILD
 #include <sys/reent.h>
 #endif
 
 extern "C" {
 #include "gw_malloc.h"
+#ifdef NXENGINE_GW
+#include "gw_mem.h"
+#endif
 }
 
 /* ====================================================================
@@ -80,14 +85,27 @@ extern "C" void *heap_alloc_mem(size_t s)
 
     if (s_heap_itc_alloc) {
         void *p = itc_malloc(s);
-        /* ITC RAM starts at 0x00000000, so itc_malloc() can't use NULL as
-         * its own "allocation failed" sentinel — see gw_malloc.c. */
         if (p != (void *)0xffffffff) {
             ptr = p;
 #ifdef GW_HEAP_TRACE
             pool = "ITCM";
 #endif
         }
+    }
+#ifdef NXENGINE_GW
+    /* Include LUT8 bonus (~150 KiB) — default path skipped it and filled AHB. */
+    if (!ptr)
+        ptr = gw_alloc(s);
+#else
+    /* Prefer AHB (malloc/free) only when needed for deleteable C++.
+     * Session-lifetime objects go to DTCM then RAM_EMU so AHB stays
+     * available for flash-cache scratch and short-lived buffers. */
+    if (!ptr) {
+        ptr = dtc_malloc(s);
+#ifdef GW_HEAP_TRACE
+        if (ptr)
+            pool = "DTCM";
+#endif
     }
     if (!ptr) {
         ptr = ram_malloc(s);
@@ -97,25 +115,19 @@ extern "C" void *heap_alloc_mem(size_t s)
 #endif
     }
     if (!ptr) {
-        ptr = dtc_malloc(s);
-#ifdef GW_HEAP_TRACE
-        if (ptr)
-            pool = "DTCM";
-#endif
-    }
-    if (!ptr) {
         ptr = ahb_malloc(s);
 #ifdef GW_HEAP_TRACE
         if (ptr)
             pool = "AHBM";
 #endif
     }
+#endif
 
     if (ptr) {
         memset(ptr, 0, s);
 #ifdef GW_HEAP_TRACE
         printf("[heap] %u B -> %s @ %p (tag %s)\n",
-               (unsigned)s, pool, ptr, heap_pool_name(ptr));
+               (unsigned)s, pool ? pool : heap_pool_name(ptr), ptr, heap_pool_name(ptr));
 #endif
     } else {
         printf("[heap] %u B -> FAIL\n", (unsigned)s);
@@ -176,17 +188,20 @@ void operator delete[](void *p, size_t) noexcept { std::free(p); }
 void *operator new(size_t s) { return heap_alloc_mem(s); }
 void *operator new[](size_t s) { return heap_alloc_mem(s); }
 
-/* No real free(): none of the bump pools behind heap_alloc_mem() support
- * releasing memory (see gw_malloc.c) — same "delete is a no-op" contract
- * the old heap.cpp had. A core's RAM_EMU/ITC/DTCM budget is reclaimed
- * wholesale the next time any core loads (itc_init()/ram_init()/dtc_init()
- * / ram_start rewind — see emulator_start()). AHB malloc allocations are
- * not pool-reset. Leaking within a single ROM session is the intended
- * tradeoff, not a bug. */
-void operator delete(void *p) { (void)p; }
-void operator delete[](void *p) { (void)p; }
-void operator delete(void *p, size_t s) { (void)p; (void)s; }
-void operator delete[](void *p, size_t s) { (void)p; (void)s; }
+/* AHB pointers are freeable; bump-pool pointers are not. */
+static void heap_free_mem(void *p)
+{
+    if (!p)
+        return;
+    uintptr_t a = (uintptr_t)p;
+    if (a >= 0x30000000u && a < 0x30020000u)
+        free(p);
+}
+
+void operator delete(void *p) noexcept { heap_free_mem(p); }
+void operator delete[](void *p) noexcept { heap_free_mem(p); }
+void operator delete(void *p, size_t) noexcept { heap_free_mem(p); }
+void operator delete[](void *p, size_t) noexcept { heap_free_mem(p); }
 #endif
 
 /* ====================================================================
