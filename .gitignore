@@ -6,7 +6,9 @@
 *.d
 *.su
 *.lst
-*_host
+# Host launcher binary only (do not match host/Makefile.nxengine_host)
+/CaveStory_host
+/*_host
 host_saves/
 .DS_Store
 __pycache__/

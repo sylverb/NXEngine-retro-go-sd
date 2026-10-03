@@ -1,0 +1,249 @@
+# Host build of upstream NXEngine (SDL 1.2) using ./CaveStory game data.
+#
+#   make host
+#   ./CaveStory_host          # runs from CaveStory/ (cwd set by wrapper)
+#
+# Requires: SDL 1.2 (brew: sdl12-compat) — no SDL_ttf (bitmap font).
+
+NX_ROOT      := third_party/nxengine
+NX_DATA_ROOT := CaveStory
+HOST_NX_ELF  := build/host/nxengine/nxengine
+HOST_NX_BIN  := CaveStory_host
+HOST_NX_BUILD := build/host/nxengine
+
+HOST_NX_CC  ?= cc
+HOST_NX_CXX ?= c++
+
+HOST_NX_SDL_CFLAGS := $(shell pkg-config --cflags sdl 2>/dev/null)
+HOST_NX_SDL_LIBS   := $(shell pkg-config --libs sdl 2>/dev/null)
+ifeq ($(HOST_NX_SDL_LIBS),)
+HOST_NX_SDL_CFLAGS := -I/opt/homebrew/include -I/usr/local/include
+HOST_NX_SDL_LIBS   := -L/opt/homebrew/lib -L/usr/local/lib -lSDL
+else
+# pkg-config often yields -I.../include/SDL but sources use <SDL/SDL.h>
+HOST_NX_SDL_CFLAGS += -I/opt/homebrew/include -I/usr/local/include
+endif
+
+HOST_NX_DEFS := -D_FILE_OFFSET_BITS=64
+
+HOST_NX_INCLUDES := \
+	-I$(NX_ROOT) \
+	-I$(NX_ROOT)/common \
+	-Isrc \
+	-Ihost/macos_shims \
+	$(HOST_NX_SDL_CFLAGS)
+
+HOST_NX_CFLAGS := -O2 -g -Wall $(HOST_NX_DEFS) $(HOST_NX_INCLUDES)
+HOST_NX_CXXFLAGS := $(HOST_NX_CFLAGS) -std=gnu++17 -fno-exceptions -fno-rtti
+
+# All NXEngine sources except Linux DRM vblank helper.
+HOST_NX_SRCS := \
+	$(NX_ROOT)/caret.cpp \
+	$(NX_ROOT)/console.cpp \
+	$(NX_ROOT)/debug.cpp \
+	$(NX_ROOT)/floattext.cpp \
+	$(NX_ROOT)/game.cpp \
+	$(NX_ROOT)/input.cpp \
+	$(NX_ROOT)/inventory.cpp \
+	$(NX_ROOT)/main.cpp \
+	$(NX_ROOT)/map.cpp \
+	$(NX_ROOT)/map_system.cpp \
+	$(NX_ROOT)/niku.cpp \
+	$(NX_ROOT)/object.cpp \
+	$(NX_ROOT)/ObjManager.cpp \
+	$(NX_ROOT)/p_arms.cpp \
+	$(NX_ROOT)/platform.cpp \
+	$(NX_ROOT)/player.cpp \
+	$(NX_ROOT)/playerstats.cpp \
+	$(NX_ROOT)/profile.cpp \
+	$(NX_ROOT)/replay.cpp \
+	$(NX_ROOT)/screeneffect.cpp \
+	$(NX_ROOT)/settings.cpp \
+	$(NX_ROOT)/slope.cpp \
+	$(NX_ROOT)/stageboss.cpp \
+	$(NX_ROOT)/stagedata.cpp \
+	$(NX_ROOT)/statusbar.cpp \
+	$(NX_ROOT)/trig.cpp \
+	$(NX_ROOT)/tsc.cpp \
+	$(NX_ROOT)/ai/ai.cpp \
+	$(NX_ROOT)/ai/balrog_common.cpp \
+	$(NX_ROOT)/ai/IrregularBBox.cpp \
+	$(NX_ROOT)/autogen/AssignSprites.cpp \
+	$(NX_ROOT)/autogen/objnames.cpp \
+	$(NX_ROOT)/common/BList.cpp \
+	$(NX_ROOT)/common/bufio.cpp \
+	$(NX_ROOT)/common/DBuffer.cpp \
+	$(NX_ROOT)/common/DString.cpp \
+	$(NX_ROOT)/common/FileBuffer.cpp \
+	$(NX_ROOT)/common/InitList.cpp \
+	$(NX_ROOT)/common/misc_comm.cpp \
+	$(NX_ROOT)/common/stat.cpp \
+	$(NX_ROOT)/common/StringList.cpp \
+	$(NX_ROOT)/endgame/credits.cpp \
+	$(NX_ROOT)/endgame/CredReader.cpp \
+	$(NX_ROOT)/endgame/island.cpp \
+	$(NX_ROOT)/endgame/misc_end.cpp \
+	$(NX_ROOT)/extract/crc.cpp \
+	$(NX_ROOT)/extract/extract.cpp \
+	$(NX_ROOT)/extract/extractfiles.cpp \
+	$(NX_ROOT)/extract/extractpxt.cpp \
+	$(NX_ROOT)/extract/extractstages.cpp \
+	$(NX_ROOT)/graphics/font.cpp \
+	$(NX_ROOT)/graphics/graphics.cpp \
+	$(NX_ROOT)/graphics/nxsurface.cpp \
+	$(NX_ROOT)/graphics/palette.cpp \
+	$(NX_ROOT)/graphics/safemode.cpp \
+	$(NX_ROOT)/graphics/sprites.cpp \
+	$(NX_ROOT)/graphics/tileset.cpp \
+	$(NX_ROOT)/intro/intro.cpp \
+	$(NX_ROOT)/intro/title.cpp \
+	$(NX_ROOT)/pause/dialog.cpp \
+	$(NX_ROOT)/pause/message.cpp \
+	$(NX_ROOT)/pause/objects.cpp \
+	$(NX_ROOT)/pause/options.cpp \
+	$(NX_ROOT)/pause/pause.cpp \
+	$(NX_ROOT)/siflib/sectSprites.cpp \
+	$(NX_ROOT)/siflib/sectStringArray.cpp \
+	$(NX_ROOT)/siflib/sif.cpp \
+	$(NX_ROOT)/siflib/sifloader.cpp \
+	$(NX_ROOT)/sound/org.cpp \
+	$(NX_ROOT)/sound/pxt.cpp \
+	$(NX_ROOT)/sound/sound.cpp \
+	$(NX_ROOT)/sound/sslib.cpp \
+	$(NX_ROOT)/TextBox/ItemImage.cpp \
+	$(NX_ROOT)/TextBox/SaveSelect.cpp \
+	$(NX_ROOT)/TextBox/StageSelect.cpp \
+	$(NX_ROOT)/TextBox/TextBox.cpp \
+	$(NX_ROOT)/TextBox/YesNoPrompt.cpp \
+	$(NX_ROOT)/ai/almond/almond.cpp \
+	$(NX_ROOT)/ai/boss/balfrog.cpp \
+	$(NX_ROOT)/ai/boss/ballos.cpp \
+	$(NX_ROOT)/ai/boss/core.cpp \
+	$(NX_ROOT)/ai/boss/heavypress.cpp \
+	$(NX_ROOT)/ai/boss/ironhead.cpp \
+	$(NX_ROOT)/ai/boss/omega.cpp \
+	$(NX_ROOT)/ai/boss/sisters.cpp \
+	$(NX_ROOT)/ai/boss/undead_core.cpp \
+	$(NX_ROOT)/ai/boss/x.cpp \
+	$(NX_ROOT)/ai/egg/egg.cpp \
+	$(NX_ROOT)/ai/egg/egg2.cpp \
+	$(NX_ROOT)/ai/egg/igor.cpp \
+	$(NX_ROOT)/ai/final_battle/balcony.cpp \
+	$(NX_ROOT)/ai/final_battle/doctor.cpp \
+	$(NX_ROOT)/ai/final_battle/doctor_common.cpp \
+	$(NX_ROOT)/ai/final_battle/doctor_frenzied.cpp \
+	$(NX_ROOT)/ai/final_battle/final_misc.cpp \
+	$(NX_ROOT)/ai/final_battle/misery_battle.cpp \
+	$(NX_ROOT)/ai/final_battle/sidekicks.cpp \
+	$(NX_ROOT)/ai/first_cave/first_cave.cpp \
+	$(NX_ROOT)/ai/hell/ballos_misc.cpp \
+	$(NX_ROOT)/ai/hell/ballos_priest.cpp \
+	$(NX_ROOT)/ai/hell/hell.cpp \
+	$(NX_ROOT)/ai/last_cave/last_cave.cpp \
+	$(NX_ROOT)/ai/maze/balrog_boss_missiles.cpp \
+	$(NX_ROOT)/ai/maze/critter_purple.cpp \
+	$(NX_ROOT)/ai/maze/gaudi.cpp \
+	$(NX_ROOT)/ai/maze/labyrinth_m.cpp \
+	$(NX_ROOT)/ai/maze/maze.cpp \
+	$(NX_ROOT)/ai/maze/pooh_black.cpp \
+	$(NX_ROOT)/ai/npc/balrog.cpp \
+	$(NX_ROOT)/ai/npc/curly.cpp \
+	$(NX_ROOT)/ai/npc/curly_ai.cpp \
+	$(NX_ROOT)/ai/npc/misery_ai.cpp \
+	$(NX_ROOT)/ai/npc/npcguest.cpp \
+	$(NX_ROOT)/ai/npc/npcplayer.cpp \
+	$(NX_ROOT)/ai/npc/npcregu.cpp \
+	$(NX_ROOT)/ai/oside/oside.cpp \
+	$(NX_ROOT)/ai/plantation/plantation.cpp \
+	$(NX_ROOT)/ai/sand/curly_boss.cpp \
+	$(NX_ROOT)/ai/sand/puppy.cpp \
+	$(NX_ROOT)/ai/sand/sand.cpp \
+	$(NX_ROOT)/ai/sand/toroko_frenzied.cpp \
+	$(NX_ROOT)/ai/sym/smoke.cpp \
+	$(NX_ROOT)/ai/sym/sym.cpp \
+	$(NX_ROOT)/ai/village/balrog_boss_running.cpp \
+	$(NX_ROOT)/ai/village/ma_pignon.cpp \
+	$(NX_ROOT)/ai/village/village.cpp \
+	$(NX_ROOT)/ai/weapons/blade.cpp \
+	$(NX_ROOT)/ai/weapons/bubbler.cpp \
+	$(NX_ROOT)/ai/weapons/fireball.cpp \
+	$(NX_ROOT)/ai/weapons/missile.cpp \
+	$(NX_ROOT)/ai/weapons/nemesis.cpp \
+	$(NX_ROOT)/ai/weapons/polar_mgun.cpp \
+	$(NX_ROOT)/ai/weapons/snake.cpp \
+	$(NX_ROOT)/ai/weapons/spur.cpp \
+	$(NX_ROOT)/ai/weapons/weapons.cpp \
+	$(NX_ROOT)/ai/weapons/whimstar.cpp \
+	$(NX_ROOT)/ai/weed/balrog_boss_flying.cpp \
+	$(NX_ROOT)/ai/weed/frenzied_mimiga.cpp \
+	$(NX_ROOT)/ai/weed/weed.cpp \
+	src/platform/gw_pack.c \
+	host/nx_platform_stub.c
+
+HOST_NX_OBJS := $(patsubst $(NX_ROOT)/%.cpp,$(HOST_NX_BUILD)/%.o,$(filter %.cpp,$(HOST_NX_SRCS)))
+HOST_NX_OBJS += $(patsubst $(NX_ROOT)/%.c,$(HOST_NX_BUILD)/%.o,$(filter $(NX_ROOT)/%.c,$(HOST_NX_SRCS)))
+HOST_NX_OBJS += $(HOST_NX_BUILD)/gw_pack.o
+HOST_NX_OBJS += $(HOST_NX_BUILD)/nx_platform_stub.o
+
+.PHONY: host host_nx host_nx_prepare host_clean_nx
+
+host: host_nx
+	$(V)$(ECHO) "[ HOST ]" $(HOST_NX_BIN) "(NXEngine + ./$(NX_DATA_ROOT))"
+
+host_nx: host_nx_prepare $(HOST_NX_BIN)
+
+# Run tree: CaveStory/ must contain data/, Doukutsu.exe, sprites.sif, smalfont.bmp
+host_nx_prepare:
+	$(V)test -f $(NX_DATA_ROOT)/data/npc.tbl || (echo "missing $(NX_DATA_ROOT)/data — drop freeware Cave Story here" >&2; exit 1)
+	$(V)test -f $(NX_DATA_ROOT)/Doukutsu.exe || (echo "missing $(NX_DATA_ROOT)/Doukutsu.exe" >&2; exit 1)
+	$(V)cp -f $(NX_ROOT)/sprites.sif $(NX_DATA_ROOT)/sprites.sif
+	$(V)cp -f $(NX_ROOT)/smalfont.bmp $(NX_DATA_ROOT)/smalfont.bmp
+	$(V)cp -f $(NX_ROOT)/tilekey.dat $(NX_DATA_ROOT)/tilekey.dat
+	$(V)cp -f $(NX_ROOT)/font.ttf $(NX_DATA_ROOT)/font.ttf 2>/dev/null || true
+
+$(HOST_NX_ELF): $(HOST_NX_OBJS)
+	$(V)$(ECHO) [ LD HOST NX ] $@
+	$(V)$(HOST_NX_CXX) -o $@ $(HOST_NX_OBJS) $(HOST_NX_SDL_LIBS) -lm
+
+# Launcher so cwd is CaveStory/ (data/, Doukutsu.exe, sprites.sif).
+$(HOST_NX_BIN): $(HOST_NX_ELF) host_nx_prepare
+	$(V)$(ECHO) [ WRAP ] $@
+	$(V)printf '%s\n' \
+		'#!/bin/sh' \
+		'set -e' \
+		'ROOT="$$(CDPATH= cd -- "$$(dirname "$$0")" && pwd)"' \
+		'cd "$$ROOT/$(NX_DATA_ROOT)"' \
+		'exec "$$ROOT/$(HOST_NX_ELF)" "$$@"' \
+		> $@
+	$(V)chmod +x $@
+
+$(HOST_NX_BUILD)/%.o: $(NX_ROOT)/%.cpp
+	$(V)mkdir -p $(dir $@)
+	$(V)$(ECHO) [ CXX HOST ] $<
+	$(V)$(HOST_NX_CXX) $(HOST_NX_CXXFLAGS) -c $< -o $@
+
+$(HOST_NX_BUILD)/%.o: $(NX_ROOT)/%.c
+	$(V)mkdir -p $(dir $@)
+	$(V)$(ECHO) [ CC HOST ] $<
+	$(V)$(HOST_NX_CC) $(HOST_NX_CFLAGS) -c $< -o $@
+
+$(HOST_NX_BUILD)/gw_pack.o: src/platform/gw_pack.c
+	$(V)mkdir -p $(dir $@)
+	$(V)$(ECHO) [ CC HOST ] $<
+	$(V)$(HOST_NX_CC) $(HOST_NX_CFLAGS) -c $< -o $@
+
+$(HOST_NX_BUILD)/nx_platform_stub.o: host/nx_platform_stub.c
+	$(V)mkdir -p $(dir $@)
+	$(V)$(ECHO) [ CC HOST ] $<
+	$(V)$(HOST_NX_CC) $(HOST_NX_CFLAGS) -c $< -o $@
+
+# Convenience: build then run with correct cwd
+.PHONY: host_run
+host_run: host
+	$(V)cd $(NX_DATA_ROOT) && ../$(HOST_NX_BIN)
+
+host_clean_nx:
+	$(V)rm -rf $(HOST_NX_BUILD)
+	$(V)rm -f $(HOST_NX_BIN) $(HOST_NX_ELF)
+
+clean:: host_clean_nx
