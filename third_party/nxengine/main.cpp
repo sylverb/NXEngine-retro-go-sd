@@ -39,9 +39,23 @@ extern "C" int nx_engine_main(void)
 int main(int argc, char *argv[])
 #endif
 {
-#ifndef NXENGINE_GW
-	(void)argc;
-	(void)argv;
+#if !defined(NXENGINE_GW)
+	/* CI / pack-assets: synthesize drum.pcm + sndcache.pcm then exit.
+	 * Must run before SetLogFilename / SDL — org/pxt/endpic/stage.dat
+	 * must already be present (scripts/prepare_cavestory_tree.py). */
+	if (argc >= 2 && strcmp(argv[1], "--ci-prepare") == 0)
+	{
+		extern bool sound_build_caches(void);
+		fprintf(stderr, "ci-prepare: building audio caches...\n");
+		fflush(stderr);
+		if (sound_build_caches())
+		{
+			fprintf(stderr, "ci-prepare: sound_build_caches failed\n");
+			return 1;
+		}
+		fprintf(stderr, "ci-prepare: done\n");
+		return 0;
+	}
 #endif
 
 #ifdef __HAIKU__

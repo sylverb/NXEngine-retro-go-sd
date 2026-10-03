@@ -16,18 +16,33 @@ are not shipped in the freeware extract path this pack uses).
 ## Build
 
 ```bash
-make pack-assets            # → CaveStory/cavestory.nxpk + sd_content copy
 make                        # → CaveStory.bin (G&W)
+make pack-assets            # → CaveStory/cavestory.nxpk + sd_content copy
 make host                   # → CaveStory_host (desktop NXEngine)
 ./CaveStory_host            # play using ./CaveStory/ (validates .nxpk at start)
+```
+
+### Game data (`cavestory.nxpk`)
+
+CI downloads the freeware English zip from
+[cavestory.one](https://www.cavestory.one/downloads/cavestoryen.zip), extracts
+embedded assets from `Doukutsu.exe`, builds `drum.pcm` / `sndcache.pcm`, then
+packs `cavestory.nxpk`. Locally:
+
+```bash
+make ci-assets              # download + extract + host --ci-prepare + pack-assets
+# or step by step:
+python3 scripts/prepare_cavestory_tree.py   # needs network (or --zip path)
+make host && ./CaveStory_host --ci-prepare
+make pack-assets
 ```
 
 `pack-assets` converts 4bpp sheets to 8bpp, decrypts TSC offline, and packs
 everything into `cavestory.nxpk`. Optional `make prepare-assets` still writes
 loose `*.u8.bmp` siblings for host debugging.
 
-Desktop needs SDL 1.2 (`brew install sdl12-compat`). First launch extracts
-music/SFX from `Doukutsu.exe` into `CaveStory/` (one-time).
+Desktop needs SDL 1.2 (`brew install sdl12-compat`) for the interactive host
+build; `--ci-prepare` only needs the linked binary (no audio device).
 
 ## SD layout
 

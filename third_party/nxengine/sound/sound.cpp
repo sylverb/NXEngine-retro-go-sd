@@ -4,6 +4,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
 
 #ifdef _SDL_MIXER
 #include <SDL_mixer.h>
@@ -16,6 +17,9 @@ Mix_Music *music_xm;
 #include "pxt.h"
 #include "sound.h"
 #include "sound.fdh"
+#if !defined(NXENGINE_GW)
+void org_close(void); /* org.fdh — avoid pulling full org.h into this TU */
+#endif
 #ifdef NXENGINE_GW
 #include "gw_nx_config.h"
 extern "C" void audio_start_playing(uint16_t length);
@@ -65,7 +69,9 @@ bool sound_init(void)
     {
         staterr("Music failed to initialize");
 #ifdef NXENGINE_GW
-        /* SFX path can still work; keep running without ORG. */
+        /* SFX path can still work; keep running without ORG — but make it loud
+         * in the log: a silent org_init failure is what looked like "no music". */
+        printf("NXEngine: WARNING — org_init failed; music disabled\n");
         SDL_PauseAudio(0);
         audio_start_playing(GW_NX_SAMPLE_RATE / GW_NX_FPS);
         return 0;
@@ -80,6 +86,24 @@ bool sound_init(void)
 #endif
     return 0;
 }
+
+#if !defined(NXENGINE_GW)
+/* Headless cache build for CI (`--ci-prepare`): no SDL audio device. */
+bool sound_build_caches(void)
+{
+    unlink(sndcache);
+    unlink("drum.pcm");
+
+    if (pxt_init()) return 1;
+    if (pxt_LoadSoundFX(pxt_dir, sndcache, NUM_SOUNDS)) return 1;
+    if (org_init(org_wavetable, pxt_dir, ORG_VOLUME)) return 1;
+
+    /* Org holds drum PCM in RAM after writing drum.pcm — drop it. */
+    org_close();
+    pxt_freeSoundFX();
+    return 0;
+}
+#endif
 
 void sound_close(void)
 {

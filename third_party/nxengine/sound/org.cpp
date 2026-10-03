@@ -46,12 +46,16 @@ static stSong song;
 #ifdef NXENGINE_GW
 /* Keep ORG work buffers tiny — RAM_EMU is already tight.
  * One beat max is 200ms → 4410 samples; stream 1 beat at a time with
- * a shared scratch + 2 final stereo buffers (~54 KiB). */
+ * a shared scratch + 2 final stereo buffers (~54 KiB).
+ * Static BSS so music cannot OOM after maps/sheets fill the bump pools. */
 static int cache_ahead_time = 80;
 #define GW_ORG_MAX_SAMPLES  4500
-static signed short *gw_scratch_buf;
-static signed short *gw_final_bufs[2];
-static char gw_org_pool_ready;
+static signed short gw_org_scratch_bss[GW_ORG_MAX_SAMPLES * 2];
+static signed short gw_org_final0_bss[GW_ORG_MAX_SAMPLES * 2];
+static signed short gw_org_final1_bss[GW_ORG_MAX_SAMPLES * 2];
+static signed short *gw_scratch_buf = gw_org_scratch_bss;
+static signed short *gw_final_bufs[2] = { gw_org_final0_bss, gw_org_final1_bss };
+static char gw_org_pool_ready = 1;
 #else
 static int cache_ahead_time = 2000;		// approximate number of ms to cache ahead (is rounded to a # of beats)
 #endif
@@ -141,12 +145,20 @@ static int SamplesToMS(int samples)
 
 static bool load_drumtable(const char *pxt_path)		// pxt_path = the path where drum pxt files can be found
 {
+#ifdef NXENGINE_GW
+	(void)pxt_path;
+	int d;
+	static const char *drum_cache = "drum.pcm";
+#define DRUM_VERSION	0x0001
+	uint16_t version;
+#else
 char fname[80];
 int d;
 FILE *fp;
 static const char *drum_cache = "drum.pcm";
 #define DRUM_VERSION	0x0001
 uint16_t version;
+#endif
 
 	#ifndef DRUM_PXT
 		for(d=0;d<NUM_DRUMS;d++)
@@ -155,6 +167,54 @@ uint16_t version;
 			if (load_drum(fname, d)) return 1;
 		}
 	#else
+
+#ifdef NXENGINE_GW
+	/* Point drum PCM at NXPK XIP — no RAM copy, no fgetl/exit path. */
+	{
+		uint32_t pack_sz = 0;
+		const uint8_t *blob = gw_pack_get(drum_cache, &pack_sz);
+		if (!blob || pack_sz < 2)
+		{
+			staterr("load_drumtable: missing %s in pack", drum_cache);
+			return 1;
+		}
+		version = (uint16_t)(blob[0] | (blob[1] << 8));
+		if (version != DRUM_VERSION)
+		{
+			staterr("load_drumtable: %s version %u != %u",
+			        drum_cache, (unsigned)version, (unsigned)DRUM_VERSION);
+			return 1;
+		}
+		uint32_t off = 2;
+		for (d = 0; d < NUM_DRUMS; d++)
+		{
+			if (off + 4 > pack_sz)
+			{
+				staterr("load_drumtable: truncated header at drum %d", d);
+				return 1;
+			}
+			uint32_t ns = (uint32_t)blob[off] | ((uint32_t)blob[off + 1] << 8) |
+			              ((uint32_t)blob[off + 2] << 16) | ((uint32_t)blob[off + 3] << 24);
+			off += 4;
+			drumtable[d].nsamples = (int)ns;
+			if (ns == 0)
+			{
+				drumtable[d].samples = NULL;
+				continue;
+			}
+			if (off + ns * 2u > pack_sz)
+			{
+				staterr("load_drumtable: truncated samples at drum %d", d);
+				return 1;
+			}
+			/* flash XIP — do not free in org_close */
+			drumtable[d].samples = (signed short *)(const void *)(blob + off);
+			off += ns * 2u;
+		}
+		stat("-- Drums XIP from pack (%u bytes)", (unsigned)pack_sz);
+		return 0;
+	}
+#else
 		
 		// try and load the drums from cache instead of synthing them
 		fp = fileopen(drum_cache, "rb");
@@ -176,12 +236,7 @@ uint16_t version;
 						drumtable[d].samples = NULL;
 						continue;
 					}
-#ifdef NXENGINE_GW
-					drumtable[d].samples = (signed short *)gw_alloc(
-						(size_t)drumtable[d].nsamples * 2u);
-#else
 					drumtable[d].samples = (signed short *)malloc(drumtable[d].nsamples * 2);
-#endif
 					if (!drumtable[d].samples)
 					{
 						fclose(fp);
@@ -225,6 +280,7 @@ uint16_t version;
 		}
 		
 		load_drumtable(pxt_path);
+#endif /* !NXENGINE_GW */
 	#endif
 	
 	//for(d=0;d<256;d++) { lprintf("%d ", drumtable[0].samples[d]); if (d%32==0) lprintf("\n"); }
@@ -554,17 +610,8 @@ int i;
 #ifdef NXENGINE_GW
 	if (!gw_org_pool_ready)
 	{
-		size_t maxb = (size_t)GW_ORG_MAX_SAMPLES * 4u;
-		gw_scratch_buf = (signed short *)gw_alloc(maxb);
-		gw_final_bufs[0] = (signed short *)gw_alloc(maxb);
-		gw_final_bufs[1] = (signed short *)gw_alloc(maxb);
-		if (!gw_scratch_buf || !gw_final_bufs[0] || !gw_final_bufs[1])
-		{
-			staterr("init_buffers: OOM org pool (%u B × 3)", (unsigned)maxb);
-			return 1;
-		}
-		gw_org_pool_ready = 1;
-		stat("org: GW pool %d samples × 3 buffers", GW_ORG_MAX_SAMPLES);
+		staterr("init_buffers: org BSS pool missing");
+		return 1;
 	}
 	for (i = 0; i < 16; i++)
 	{

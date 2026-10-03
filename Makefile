@@ -146,7 +146,7 @@ docker_shell:
 #######################################
 include host/Makefile.nxengine_host
 
-.PHONY: host_scaffold prepare-assets pack-assets
+.PHONY: host_scaffold prepare-assets pack-assets prepare-cavestory-tree ci-assets
 host_scaffold:
 	$(MAKE) -f host/Makefile.host_scaffold host
 
@@ -154,6 +154,19 @@ host_scaffold:
 prepare-assets:
 	$(V)$(ECHO) "[ ASSETS ]" prepare CaveStory *.u8.bmp
 	$(V)python3 scripts/prepare_cavestory_assets.py CaveStory
+
+# Download freeware zip + extract Doukutsu.exe + copy NXEngine support files.
+# Does not build drum.pcm / sndcache.pcm — use ./CaveStory_host --ci-prepare.
+prepare-cavestory-tree:
+	$(V)$(ECHO) "[ CS ]" prepare CaveStory/ from cavestoryen.zip
+	$(V)python3 scripts/prepare_cavestory_tree.py
+
+# Full asset pipeline for CI: tree → host audio caches → cavestory.nxpk.
+ci-assets: host
+	$(V)$(ECHO) "[ CS ]" CI asset pack
+	$(V)python3 scripts/prepare_cavestory_tree.py
+	$(V)./$(HOST_NX_BIN) --ci-prepare
+	$(V)$(MAKE) --no-print-directory pack-assets
 
 # Build cavestory.nxpk (8bpp images + cleartext TSC) and copy to sd_content.
 pack-assets:
@@ -164,3 +177,7 @@ pack-assets:
 		cp -f $(PACKED_BIN) sd_content/homebrews/$(PACKED_BIN); \
 		$(ECHO) "[ SD ]" sd_content/homebrews/$(PACKED_BIN); \
 	fi
+
+.PHONY: print-NXPK
+print-NXPK:
+	@echo sd_content/homebrews/cavestory.nxpk

@@ -124,6 +124,7 @@ def build_release_notes(
     docker_image: str,
     archive_name: str,
     debug_archive_name: str,
+    nxpk_name: str | None = None,
 ) -> str:
     sdk_version = (ROOT / "SDK_VERSION").read_text(encoding="utf-8").strip()
     install_path = f"/{sd_dir}/{packed_name}"
@@ -138,6 +139,10 @@ def build_release_notes(
         f"- Project kind: `{project_kind}`",
         f"- Packed binary: `{packed_name}`",
         f"- SD install path: `{install_path}`",
+    ]
+    if nxpk_name:
+        lines.append(f"- Game data pack: `/{sd_dir}/{nxpk_name}` (required)")
+    lines += [
         f"- Release archive: `{archive_name}` (unzip onto the SD root)",
         f"- Debug archive: `{debug_archive_name}` (ELF + linker map)",
         f"- Built with: `{docker_image}`",
@@ -181,6 +186,7 @@ def stage_release(
     docker_image: str | None,
     elf_path: Path | None,
     map_path: Path | None,
+    nxpk_path: Path | None,
 ) -> None:
     cfg = read_make_vars()
     project_kind = cfg["PROJECT_KIND"]
@@ -215,12 +221,23 @@ def stage_release(
     sd_bin = sd_root / packed_name
     shutil.copy2(bin_path, sd_bin)
 
+    sd_members: list[tuple[Path, str]] = [(sd_bin, f"{sd_dir}/{packed_name}")]
+    nxpk_name = None
+    if nxpk_path is not None:
+        nxpk = nxpk_path if nxpk_path.is_absolute() else (ROOT / nxpk_path)
+        if not nxpk.is_file():
+            raise SystemExit(f"NXPK not found: {nxpk}")
+        nxpk_name = nxpk.name
+        sd_nxpk = sd_root / nxpk_name
+        shutil.copy2(nxpk, sd_nxpk)
+        sd_members.append((sd_nxpk, f"{sd_dir}/{nxpk_name}"))
+
     stem = Path(packed_name).stem
     tag_slug = slug(tag)
 
     archive_name = f"{stem}-{tag_slug}.zip"
     archive_path = out_dir / archive_name
-    write_zip(archive_path, [(sd_bin, f"{sd_dir}/{packed_name}")])
+    write_zip(archive_path, sd_members)
 
     debug_archive_name = f"{stem}-{tag_slug}-debug.zip"
     debug_archive_path = out_dir / debug_archive_name
@@ -245,6 +262,7 @@ def stage_release(
             docker_image=resolved_docker,
             archive_name=archive_name,
             debug_archive_name=debug_archive_name,
+            nxpk_name=nxpk_name,
         ),
         encoding="utf-8",
     )
@@ -304,6 +322,12 @@ def main() -> None:
         "--docker-image",
         help="builder image string for release notes (default: Makefile DOCKER_IMAGE)",
     )
+    parser.add_argument(
+        "--nxpk",
+        dest="nxpk_path",
+        type=Path,
+        help="optional cavestory.nxpk to include next to the .bin in the SD zip",
+    )
     args = parser.parse_args()
 
     cfg = read_make_vars()
@@ -323,6 +347,7 @@ def main() -> None:
         docker_image=args.docker_image,
         elf_path=args.elf_path,
         map_path=args.map_path,
+        nxpk_path=args.nxpk_path,
     )
 
 
