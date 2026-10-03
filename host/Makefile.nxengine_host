@@ -26,11 +26,19 @@ endif
 
 HOST_NX_DEFS := -D_FILE_OFFSET_BITS=64
 
+# macOS has no <endian.h>; Linux/glibc does. Only inject the shim on Darwin.
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Darwin)
+HOST_NX_ENDIAN_INC := -Ihost/macos_shims
+else
+HOST_NX_ENDIAN_INC :=
+endif
+
 HOST_NX_INCLUDES := \
 	-I$(NX_ROOT) \
 	-I$(NX_ROOT)/common \
 	-Isrc \
-	-Ihost/macos_shims \
+	$(HOST_NX_ENDIAN_INC) \
 	$(HOST_NX_SDL_CFLAGS)
 
 HOST_NX_CFLAGS := -O2 -g -Wall $(HOST_NX_DEFS) $(HOST_NX_INCLUDES)
