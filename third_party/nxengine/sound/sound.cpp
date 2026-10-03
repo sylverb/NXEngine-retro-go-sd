@@ -16,6 +16,10 @@ Mix_Music *music_xm;
 #include "pxt.h"
 #include "sound.h"
 #include "sound.fdh"
+#ifdef NXENGINE_GW
+#include "gw_nx_config.h"
+extern "C" void audio_start_playing(uint16_t length);
+#endif
 
 #define MUSIC_OFF		0
 #define MUSIC_ON		1
@@ -62,12 +66,18 @@ bool sound_init(void)
         staterr("Music failed to initialize");
 #ifdef NXENGINE_GW
         /* SFX path can still work; keep running without ORG. */
+        SDL_PauseAudio(0);
+        audio_start_playing(GW_NX_SAMPLE_RATE / GW_NX_FPS);
         return 0;
 #else
         return 1;
 #endif
     }
 
+#ifdef NXENGINE_GW
+    SDL_PauseAudio(0);
+    audio_start_playing(GW_NX_SAMPLE_RATE / GW_NX_FPS);
+#endif
     return 0;
 }
 

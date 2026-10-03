@@ -89,6 +89,11 @@ char SSInit(void)
 	lockcount = 0;
 #ifdef _SDL_MIXER
     Mix_Pause(-1);
+#elif defined(NXENGINE_GW)
+	/* Stay paused until sound_init finishes — unpausing here nests the
+	 * mixer under pxt/org load and overflowed the ~24 KiB DTCM stack
+	 * (HardFault in firmware printf/memchr right after org BSS ready). */
+	SDL_PauseAudio(1);
 #else
     SDL_PauseAudio(0);
 #endif

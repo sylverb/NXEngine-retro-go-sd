@@ -52,6 +52,11 @@ void c------------------------------() {}
 
 void stat(const char *fmt, ...)
 {
+#ifdef NXENGINE_GW
+	/* Hot path: puts/_svfprintf_r + 1 KiB locals blow the ~24 KiB DTCM stack
+	 * (seen as HardFault PC=memchr LR=_svfprintf_r). Stay silent on device. */
+	(void)fmt;
+#else
     va_list ar;
     char buffer[MAXBUFSIZE];
 	va_start(ar, fmt);
@@ -71,10 +76,19 @@ void stat(const char *fmt, ...)
     if (logfilename[0])
         writelog(buffer, true);
 #endif
+#endif
 }
 
 void staterr(const char *fmt, ...)
 {
+#ifdef NXENGINE_GW
+	va_list ar;
+	char buf[192];
+	va_start(ar, fmt);
+	vsnprintf(buf, sizeof(buf), fmt, ar);
+	va_end(ar);
+	printf("%s\n", buf);
+#else
 va_list ar;
 char buffer[MAXBUFSIZE];
 
@@ -91,6 +105,5 @@ char buffer[MAXBUFSIZE];
 		writelog(buffer, false);
 		writelog(" >>\n", false);
 	}
+#endif
 }
-
-

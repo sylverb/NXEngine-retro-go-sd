@@ -104,10 +104,6 @@ void app_main(uint8_t load_state, uint8_t start_paused, int8_t save_slot)
 
     gw_mem_init();
     boot_banner("Cave Story", "loading pack...");
-    printf("NXEngine: pools ahb_free=%u dtc_free=%u ram_free=%u\n",
-           (unsigned)ahb_get_free_size(),
-           (unsigned)dtc_get_free_size(),
-           (unsigned)ram_get_free_size());
 
 #ifndef HOST_BUILD
     /* Saves live under /data/homebrew/cavestory_* (same tree as .cfg). */
@@ -139,9 +135,19 @@ void app_main(uint8_t load_state, uint8_t start_paused, int8_t save_slot)
                 HAL_Delay(100);
             }
         }
+        /* Circular flash cache can place a hit anywhere in EXTFLASH. Log the
+         * absolute address so "works after settings reset" regressions are
+         * obvious (old builds freed XIP above 0x91000000 / 0x92000000). */
+        printf("NXEngine: nxpk XIP %u bytes @ %p (off 0x%lx)\n",
+               (unsigned)pack_sz, (void *)pack,
+               (unsigned long)((uintptr_t)pack - 0x90000000u));
+        /* Touch first + last byte through the mmap window before trusting TOC. */
+        volatile uint8_t probe = pack[0] ^ pack[pack_sz - 1];
+        (void)probe;
         if (gw_pack_init(pack, pack_sz) != 0) {
-            printf("NXEngine: FATAL — bad NXPK (%u bytes)\n", (unsigned)pack_sz);
-            boot_banner("bad nxpk", "re-run make pack-assets");
+            printf("NXEngine: FATAL — bad NXPK (%u bytes @ %p)\n",
+                   (unsigned)pack_sz, (void *)pack);
+            boot_banner("bad nxpk", "clear flash cache");
             while (1) {
                 wdog_refresh();
                 HAL_Delay(100);
@@ -152,15 +158,11 @@ void app_main(uint8_t load_state, uint8_t start_paused, int8_t save_slot)
     odroid_overlay_draw_progress_bar("Cave Story data", 100);
     boot_banner("Cave Story", "starting...");
 
-    /* Defer SAI start until after heavy init would be nicer, but NXEngine's
-     * SSInit expects the DMA path already live for PauseAudio(0). */
-    audio_start_playing(GW_NX_SAMPLE_RATE / GW_NX_FPS);
+    /* Defer SAI until after NXEngine sound_init — starting DMA here nests
+     * on the same MSP as deep init and overflows DTCM (~24 KiB). */
     if (start_paused)
         odroid_audio_mute(true);
 
-    printf("NXEngine: entering main (data /homebrews) ram_free=%u\n",
-           (unsigned)ram_get_free_size());
-    printf("NXEngine: build marker org-bss-20260920\n");
     int rc = nx_engine_main();
     printf("NXEngine: exited rc=%d\n", rc);
 

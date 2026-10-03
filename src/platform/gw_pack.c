@@ -55,8 +55,7 @@ static int path_eq_ci(const char *a, const char *b)
     }
 }
 
-/* Strip SD root / leading ./ so lookup keys match pack TOC.
- * Also collapse "dir/../" so data/../endpic/foo → endpic/foo. */
+/* Strip SD root / leading ./ so lookup keys match pack TOC. */
 static void normalize_pack_path(const char *in, char *buf, size_t buflen)
 {
     const char *p = in ? in : "";
@@ -66,6 +65,7 @@ static void normalize_pack_path(const char *in, char *buf, size_t buflen)
 
     static const char *roots[] = {
         GW_NX_DATA_ROOT "/",
+        "/roms/homebrew/cavestory/",
         NULL,
     };
     for (int i = 0; roots[i]; i++) {
@@ -78,35 +78,7 @@ static void normalize_pack_path(const char *in, char *buf, size_t buflen)
     while (*p == '/')
         p++;
 
-    char tmp[GW_NXPK_PATH_LEN];
-    snprintf(tmp, sizeof(tmp), "%s", p);
-
-    char *stack[32];
-    int nstack = 0;
-    char *tok = tmp;
-    while (*tok) {
-        char *slash = strchr(tok, '/');
-        if (slash)
-            *slash = '\0';
-        if (tok[0] && !(tok[0] == '.' && tok[1] == '\0')) {
-            if (tok[0] == '.' && tok[1] == '.' && tok[2] == '\0') {
-                if (nstack > 0)
-                    nstack--;
-            } else if (nstack < (int)(sizeof(stack) / sizeof(stack[0]))) {
-                stack[nstack++] = tok;
-            }
-        }
-        if (!slash)
-            break;
-        tok = slash + 1;
-    }
-
-    buf[0] = '\0';
-    for (int i = 0; i < nstack; i++) {
-        if (i)
-            strncat(buf, "/", buflen - strlen(buf) - 1);
-        strncat(buf, stack[i], buflen - strlen(buf) - 1);
-    }
+    snprintf(buf, buflen, "%s", p);
 }
 
 int gw_pack_init(const uint8_t *base, uint32_t size)
@@ -130,11 +102,15 @@ int gw_pack_init(const uint8_t *base, uint32_t size)
     if (8u + toc_bytes > size)
         return -1;
 
-    const uint8_t *e0 = base + 8;
-    uint32_t off0 = rd_u32(e0 + GW_NXPK_PATH_LEN);
-    uint32_t sz0 = rd_u32(e0 + GW_NXPK_PATH_LEN + 4);
-    if ((uint64_t)off0 + sz0 > size)
-        return -1;
+    /* Validate every TOC range — a stale flash-cache hit can look like
+     * NXPK at the header but have garbage offsets past EOF. */
+    for (uint16_t i = 0; i < count; i++) {
+        const uint8_t *ent = base + 8 + (uint32_t)i * GW_ENTRY_STRIDE;
+        uint32_t off = rd_u32(ent + GW_NXPK_PATH_LEN);
+        uint32_t sz = rd_u32(ent + GW_NXPK_PATH_LEN + 4);
+        if (off < 8u + toc_bytes || (uint64_t)off + sz > size)
+            return -1;
+    }
 
     s_base = base;
     s_size = size;
@@ -147,6 +123,15 @@ int gw_pack_init(const uint8_t *base, uint32_t size)
 bool gw_pack_ready(void)
 {
     return s_base != NULL && s_count > 0;
+}
+
+bool gw_pack_ptr_in_pack(const void *p)
+{
+    if (!p || !s_base || s_size == 0)
+        return false;
+    uintptr_t a = (uintptr_t)p;
+    uintptr_t b = (uintptr_t)s_base;
+    return a >= b && a < (b + (uintptr_t)s_size);
 }
 
 const uint8_t *gw_pack_get(const char *relpath, uint32_t *size_out)

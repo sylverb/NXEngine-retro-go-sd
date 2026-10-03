@@ -31,6 +31,9 @@ bool gw_pack_ready(void);
  * Returns a pointer into the mapped pack (do not free). */
 const uint8_t *gw_pack_get(const char *relpath, uint32_t *size_out);
 
+/* True if p lies inside the mapped NXPK image (XIP or host blob). */
+bool gw_pack_ptr_in_pack(const void *p);
+
 /* Read-only memfile over a pack blob (or any const buffer). */
 FILE *gw_pack_mem_fopen(const uint8_t *data, uint32_t size);
 

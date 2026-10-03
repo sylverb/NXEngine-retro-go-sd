@@ -218,12 +218,6 @@ static int gw_surface_make_writable(SDL_Surface *s)
         nbytes = 1;
     /* Small glyph/font surfaces only — large XIP stays read-only. */
     if (nbytes > 8192u) {
-        static int once;
-        if (!once) {
-            once = 1;
-            printf("SDL: skip XIP COW >8KiB (e.g. %dx%d %u B)\n",
-                   s->w, s->h, (unsigned)nbytes);
-        }
         return -1;
     }
     uint8_t *ram = (uint8_t *)gw_alloc(nbytes);
@@ -373,8 +367,6 @@ SDL_Surface *SDL_SetVideoMode(int w, int h, int bpp, Uint32 flags)
     s_screen->clip_rect.h = (Uint16)h;
     s_screen->refcount = 1;
     s_screen_is_lcd = 0;
-    printf("SDL_SetVideoMode: %dx%d @ %dbpp (lut8=%d, ram bb)\n",
-           w, h, lut8 ? 8 : 16, lut8);
     return s_screen;
 }
 
@@ -1078,43 +1070,57 @@ SDL_Surface *SDL_DisplayFormat(SDL_Surface *surface)
 }
 
 /* ---- BMP / Cave Story PBM: XIP from NXPK pack ---- */
+static const uint8_t *gw_pack_try(const char *key, uint32_t *size_out, char *path_out, size_t path_cap)
+{
+    uint32_t sz = 0;
+    const uint8_t *p;
+
+    if (!key || !key[0])
+        return NULL;
+    p = gw_pack_get(key, &sz);
+    if (!p || sz == 0)
+        return NULL;
+    if (path_out && path_cap)
+        snprintf(path_out, path_cap, "%s", key);
+    if (size_out)
+        *size_out = sz;
+    return p;
+}
+
 static const uint8_t *gw_pack_image(const char *file, uint32_t *size_out, char *path_out, size_t path_cap)
 {
-    char path_a[256], path_b[256], path_c[256];
-    const char *candidates[6];
-    int n = 0;
+    char tmp[160];
+    const uint8_t *hit;
+    const char *base;
 
     if (!file)
         return NULL;
 
-    candidates[n++] = file;
+    hit = gw_pack_try(file, size_out, path_out, path_cap);
+    if (hit)
+        return hit;
+
     if (file[0] != '/') {
-        snprintf(path_a, sizeof(path_a), "data/%s", file);
-        candidates[n++] = path_a;
-    }
-    /* data/../endpic/pixel.bmp → also try endpic/pixel.bmp explicitly */
-    {
-        const char *base = strrchr(file, '/');
-        base = base ? base + 1 : file;
-        if (base[0]) {
-            snprintf(path_b, sizeof(path_b), "endpic/%s", base);
-            candidates[n++] = path_b;
-            snprintf(path_c, sizeof(path_c), "data/endpic/%s", base);
-            candidates[n++] = path_c;
-        }
+        snprintf(tmp, sizeof(tmp), "data/%s", file);
+        hit = gw_pack_try(tmp, size_out, path_out, path_cap);
+        if (hit)
+            return hit;
     }
 
-    for (int i = 0; i < n; i++) {
-        uint32_t sz = 0;
-        const uint8_t *p = gw_pack_get(candidates[i], &sz);
-        if (p && sz > 0) {
-            if (path_out && path_cap)
-                snprintf(path_out, path_cap, "%s", candidates[i]);
-            if (size_out)
-                *size_out = sz;
-            return p;
-        }
+    /* data/../endpic/pixel.bmp → also try endpic/pixel.bmp explicitly */
+    base = strrchr(file, '/');
+    base = base ? base + 1 : file;
+    if (base[0]) {
+        snprintf(tmp, sizeof(tmp), "endpic/%s", base);
+        hit = gw_pack_try(tmp, size_out, path_out, path_cap);
+        if (hit)
+            return hit;
+        snprintf(tmp, sizeof(tmp), "data/endpic/%s", base);
+        hit = gw_pack_try(tmp, size_out, path_out, path_cap);
+        if (hit)
+            return hit;
     }
+
     if (size_out)
         *size_out = 0;
     return NULL;
@@ -1143,8 +1149,6 @@ static SDL_Surface *gw_surface_xip_8(const uint8_t *pixels, int width, int heigh
             s_xip_pal_colors[i].r = pal_bgra[i * 4 + 2];
         }
     }
-    printf("SDL_LoadBMP: XIP 8bpp %dx%d pitch=%d%s @ %p\n",
-           width, height, pitch, bottomup ? " bottom-up" : "", (const void *)pixels);
     return s;
 }
 
@@ -1183,14 +1187,13 @@ static int gw_unpack4_fill(void *user, uint8_t *buf, uint32_t buf_cap)
 
 SDL_Surface *SDL_LoadBMP(const char *file)
 {
-    char path[256];
+    char path[160];
     uint32_t size = 0;
     const uint8_t *blob = gw_pack_image(file, &size, path, sizeof(path));
     if (!blob || size < 54) {
         set_err("LoadBMP pack");
         return NULL;
     }
-    printf("SDL_LoadBMP: pack XIP '%s' (%u bytes)\n", path, (unsigned)size);
 
     const uint8_t *hdr = blob;
     if (hdr[0] != 'B' || hdr[1] != 'M') {
@@ -1229,7 +1232,6 @@ SDL_Surface *SDL_LoadBMP(const char *file)
         static int warned_4bpp;
         if (!warned_4bpp) {
             warned_4bpp = 1;
-            printf("SDL_LoadBMP: 4bpp '%s' — rebuild with: make pack-assets\n", path);
         }
 
         uint32_t need = (uint32_t)width * (uint32_t)height;
@@ -1258,7 +1260,6 @@ SDL_Surface *SDL_LoadBMP(const char *file)
             }
             off += (uint32_t)n;
         }
-        printf("SDL_LoadBMP: RAM unpack 4→8 '%s' (%dx%d)\n", path, width, height);
         SDL_Surface *s = gw_surface_xip_8(ram, width, height, width, 0, pal, ncolors);
         if (s)
             s->flags &= ~SDL_GW_EXTERNAL_PIXELS;

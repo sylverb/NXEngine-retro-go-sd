@@ -4,13 +4,20 @@
 
 #include <stdint.h>
 
-#ifdef __clang__
+#ifdef NXENGINE_GW
+	/* newlib PATH_MAX is 1024 — a single char path[MAXPATHLEN] on the
+	 * ~24 KiB DTCM stack hardfaults inside sprintf (_svfprintf_r push). */
+	#define MAXPATHLEN	160
+#elif defined(__clang__)
 	#define MAXPATHLEN	256
 #else
 	#include <sys/param.h>	// MAXPATHLEN
 #endif
 
-#ifndef PATH_MAX
+#ifdef NXENGINE_GW
+	#undef PATH_MAX
+	#define PATH_MAX	MAXPATHLEN
+#elif !defined(PATH_MAX)
 	#define PATH_MAX	259
 #endif
 

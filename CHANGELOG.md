@@ -1,11 +1,6 @@
 # Changelog
 
-This file is a template for the single project created from this repo.
-At project setup time you choose exactly one kind by setting `PROJECT_KIND`
-to `core` or `homebrew` (you will only build/release that chosen kind).
-
-Update the content for your project and keep the section heading matching
-the pushed release tag (CI requirement).
+All notable changes to this Cave Story GWHB port are documented here.
 
 This file follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Release tags must
@@ -20,56 +15,48 @@ When you cut a release:
 CI reads the matching section and uses it as the GitHub Release notes. Assets
 attached to the release:
 
-- `<binary>-<tag>.zip` — SD layout only (`cores/` or `homebrews/` + packed `.bin`)
+- `<binary>-<tag>.zip` — SD layout only (`homebrews/` + packed `.bin` + `.nxpk`)
 - `<binary>-<tag>-debug.zip` — ELF + linker map (use `arm-none-eabi-addr2line` for crash PC/LR → function/line)
 
 ## [Unreleased]
 
-### Added
+### Fixed
 
-- (your changes here)
+- Hardfault on some devices with the same firmware: NXPK XIP pointers were
+  `free()`’d when the circular flash cache placed `cavestory.nxpk` above a
+  fixed 16/32 MiB OSPI cutoff. Teardown now uses `gw_pack_ptr_in_pack()` so
+  any cache offset (including 64–256 MiB chips) is safe.
+- DTCM stack overflow during boot audio init: keep SAI paused through
+  `sound_init` / org+pxt load, then `audio_start_playing` afterward.
+- Shrink path / log buffers (`PATH_MAX` / `MAXPATHLEN`) and avoid `sprintf` of
+  TSC pack keys during ITCM `tsc_init` (firmware `vsprintf` stack cost).
+- Full NXPK TOC validation + first/last-byte XIP probe at pack map time;
+  clearer “clear flash cache” banner on a bad/stale cache hit.
 
 ### Changed
 
-- (your changes here)
+- Load drums into RAM pools instead of pinning XIP slices; org mix buffers
+  allocate from `gw_alloc` instead of large static BSS.
+- Defer noisy pool/printf spam at boot; log the mapped NXPK absolute address
+  for flash-cache diagnosis.
 
-### Fixed
+## [v1.0.0] - 2026-10-03
 
-- (your changes here)
-
-## [v1.0.0] - 2026-08-12
-
-Initial public release for your chosen kind (`core` or `homebrew`).
+Initial Cave Story GWHB release (`PROJECT_KIND=homebrew`).
 
 ### Added
 
-- Freestanding Cortex-M7 skeleton (`src/main.c`) with LCD demo, square-wave
-  audio, save/load/screenshot hooks, and watchdog-friendly frame loop.
-- Vendored SDK, linker scripts, and ABI bridge for `gw_firmware_abi_t`.
-- Packaging for both project kinds:
-  - **core** → `pack_core.py`, SD path `/cores/<name>.bin`
-  - **homebrew** → `pack_homebrew.py`, SD path `/homebrews/<name>.bin`
-- Docker builder integration (`make docker`) using `sylverb/retro-go-sd-builder`.
-- CI build on push/PR and automated GitHub Release on `v*` tags.
+- NXEngine Cave Story engine on Retro-Go SD as `CaveStory.bin`.
+- Single `cavestory.nxpk` asset pack (8bpp sheets, decrypted TSC, music/SFX)
+  flash-cached once and served via XIP.
+- LUT8 LCD path, title cover packing, saves under `/data/homebrew/cavestory_*`.
+- Host build (`make host`) for desktop bring-up against the same pack.
 
 ### Install
 
-Only the section corresponding to your chosen `PROJECT_KIND` is relevant for
-your derived project.
-
-**Core (`PROJECT_KIND=core`, default)**
-
-- Copy `example.bin` to `/cores/` on the SD card.
-- Place test ROMs under `/roms/example/` (dirname matches `CORE_NAME` in the
-  Makefile).
+- Copy `CaveStory.bin` and `cavestory.nxpk` to `/homebrews/` on the SD card.
+- Optional coverflow override: `/covers/homebrew/CaveStory.img` (JPEG ≤186×100,
+  ≤10 KiB).
 - Requires firmware whose ABI matches `SDK_VERSION` in this repository.
 
-**Homebrew (`PROJECT_KIND=homebrew`)**
-
-- Set `PROJECT_KIND=homebrew` in the Makefile, rebuild, then copy
-  `ExampleHB.bin` to `/homebrews/`.
-- Optional coverflow override: `/covers/homebrew/ExampleHB.img` (JPEG ≤186×100,
-  ≤10 KiB).
-
-The release archive contains the ready-to-copy SD layout for the active project
-kind only (`cores/` or `homebrews/`).
+The release archive contains the ready-to-copy SD layout under `homebrews/`.

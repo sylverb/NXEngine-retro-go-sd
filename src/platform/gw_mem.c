@@ -16,9 +16,6 @@ void gw_mem_init(void)
 	s_bonus_left = 0;
 	if (lcd_get_mode() == LCD_MODE_LUT8)
 		lcd_get_bonus_pool(&s_bonus, &s_bonus_left);
-	printf("gw_mem: bonus=%u B @ %p (lut8=%d)\n",
-	       (unsigned)s_bonus_left, (void *)s_bonus,
-	       lcd_get_mode() == LCD_MODE_LUT8);
 }
 
 int gw_is_ahb(const void *p)

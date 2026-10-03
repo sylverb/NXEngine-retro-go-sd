@@ -31,7 +31,7 @@ static int mode_is_readonly(const char *mode)
 
 FILE *fileopen(const char *fname, const char *mode)
 {
-	char path[256];
+	char path[160];
 	if (!fname)
 		return NULL;
 	/* Skip "./" so FatFs gets clean paths under the data root. */

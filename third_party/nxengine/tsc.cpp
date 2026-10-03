@@ -129,24 +129,16 @@ void c------------------------------() {}
 
 bool tsc_init(void)
 {
-char fname[MAXPATHLEN];
-
 	GenLTC();
 	curscript.running = false;
 	for(int i=0;i<NUM_SCRIPT_PAGES;i++)
-	
-	// load the "common" TSC scripts available to all maps
-	sprintf(fname, "%s/Head.tsc", data_dir);
-	if (tsc_load(fname, SP_HEAD)) return 1;
-	
-	// load the inventory screen scripts
-	sprintf(fname, "%s/ArmsItem.tsc", data_dir);
-	if (tsc_load(fname, SP_ARMSITEM)) return 1;
-	
-	// load stage select/teleporter scripts
-	sprintf(fname, "%s/StageSelect.tsc", data_dir);
-	if (tsc_load(fname, SP_STAGESELECT)) return 1;
-	
+		script_pages[i].Clear();
+
+	/* Literal pack keys — avoid sprintf (ABI vsprintf) during ITCM init. */
+	if (tsc_load("data/Head.tsc", SP_HEAD)) return 1;
+	if (tsc_load("data/ArmsItem.tsc", SP_ARMSITEM)) return 1;
+	if (tsc_load("data/StageSelect.tsc", SP_STAGESELECT)) return 1;
+
 	return 0;
 }
 
@@ -206,12 +198,9 @@ bool result;
 	//int top_script = CompileScripts(buf, fsize, base);
 	result = tsc_compile(buf, fsize, pageno);
 #ifdef NXENGINE_GW
-	/* Decrypted buffer may be flash XIP — never free. */
-	{
-		uintptr_t a = (uintptr_t)buf;
-		if (a < 0x90000000u || a >= 0x92000000u)
-			free(buf);
-	}
+	/* Pack / flash XIP — never free. Only release true heap buffers. */
+	if (!gw_pack_ptr_in_pack(buf))
+		free(buf);
 #else
 	free(buf);
 #endif

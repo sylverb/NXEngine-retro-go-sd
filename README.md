@@ -10,6 +10,9 @@ Port of [EXL/NXEngine](https://github.com/EXL/NXEngine) (Cave Story engine) as a
 playable. Game data is a single **`cavestory.nxpk`** (~6 MiB) flash-cached once
 at boot; assets are XIP lookups (no per-file flash writes).
 
+Supported in-game languages: **English** and **Russian** (other localizations
+are not shipped in the freeware extract path this pack uses).
+
 ## Build
 
 ```bash
@@ -35,11 +38,32 @@ music/SFX from `Doukutsu.exe` into `CaveStory/` (one-time).
 /data/homebrew/cavestory_profile.dat   ← save slot 0 (+ profile2.dat, …)
 ```
 
+Optional cover override: `/covers/homebrew/CaveStory.img` (JPEG ≤186×100,
+≤10 KiB). An embedded title-screen cover is packed into the GWHB when present
+under `src/assets/cover.png`.
+
+## Flash cache / hardfaults
+
+`cavestory.nxpk` is mapped through the firmware circular **flash cache**. On a
+large EXTFLASH (64–256 MiB) the pack can land anywhere in the OSPI window
+(`0x90000000` + offset), not only near the start.
+
+Pointers into that pack must **never** be passed to `free()`. Older builds used
+a fixed “XIP = below 16/32 MiB” check; when the cache placed the pack higher,
+TSC/org teardown freed flash addresses, corrupted the AHB heap, and hardfaulted
+inside firmware `printf` (`memchr` / `_svfprintf_r`). Clearing Retro-Go settings
+(or the flash cache) rewrote the pack at a low address and hid the bug.
+
+Current builds use `gw_pack_ptr_in_pack()` against the mapped NXPK range, so
+flash size and cache position no longer matter. If you still see a boot hang on
+“bad nxpk”, clear the flash cache once so a stale entry is rewritten.
+
 ## Requirements
 
 - `arm-none-eabi-gcc` (hard-float `fpv5-d16`)
 - Python 3 (+ Pillow if you use `prepare-assets`)
 - Freeware Cave Story 1.0.0.6 data (not redistributed here)
+- Firmware ABI matching `SDK_VERSION` in this repository
 
 ## License
 
