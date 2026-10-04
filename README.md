@@ -10,8 +10,9 @@ Port of [EXL/NXEngine](https://github.com/EXL/NXEngine) (Cave Story engine) as a
 playable. Game data is a single **`cavestory.nxpk`** (~6 MiB) flash-cached once
 at boot; assets are XIP lookups (no per-file flash writes).
 
-Supported in-game languages: **English** and **Russian** (other localizations
-are not shipped in the freeware extract path this pack uses).
+In-game text language comes from the **`.nxpk` pack** you install (English or
+French today; more locales can be added in `scripts/cavestory_locales.py`).
+Tagged releases ship one SD zip per language.
 
 ## Build
 
@@ -24,13 +25,14 @@ make host                   # → CaveStory_host (desktop NXEngine)
 
 ### Game data (`cavestory.nxpk`)
 
-CI downloads the freeware English zip from
+CI downloads freeware packs from
 [cavestory.one](https://www.cavestory.one/download/cave-story.php), extracts
 embedded assets from `Doukutsu.exe`, builds `drum.pcm` / `sndcache.pcm`, then
-packs `cavestory.nxpk`. Locally:
+packs one `.nxpk` per locale. Locally:
 
 ```bash
-make ci-assets              # EN: download + extract + host --ci-prepare + pack-assets
+make ci-assets              # EN only
+make ci-assets-all          # every locale in scripts/cavestory_locales.py
 # or step by step:
 python3 scripts/prepare_cavestory_tree.py   # needs network (or --archive path)
 make host && ./CaveStory_host --ci-prepare
@@ -39,10 +41,9 @@ make pack-assets
 
 #### Other languages (French first)
 
-Fan translations from [cavestory.one](https://www.cavestory.one/download/cave-story.php)
-are usually a `data/` overlay (scripts + some images). Music/SFX still come from
-the English `Doukutsu.exe` extract. Needs `p7zip` (`brew install p7zip` /
-`apt install p7zip-full`) for `.7z` locales.
+Fan translations are usually a `data/` overlay (scripts + some images). Music/SFX
+still come from the English `Doukutsu.exe` extract. Needs `p7zip`
+(`brew install p7zip` / `apt install p7zip-full`) for `.7z` locales.
 
 ```bash
 make list-locales           # en, fr, …
@@ -51,8 +52,8 @@ make pack-assets-fr         # → sd_content/homebrews/cavestory_fr.nxpk
 make ci-assets LOCALE=fr
 ```
 
-On the SD card the homebrew always opens `/homebrews/cavestory.nxpk`. To play
-French, copy/rename the locale pack:
+On the SD card the homebrew always opens `/homebrews/cavestory.nxpk`. Release
+zips already use that name (`CaveStory-<tag>-fr.zip`, etc.). From a local pack:
 
 ```bash
 cp sd_content/homebrews/cavestory_fr.nxpk /path/to/sd/homebrews/cavestory.nxpk

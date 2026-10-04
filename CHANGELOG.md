@@ -12,11 +12,14 @@ Initial Cave Story GWHB release (`PROJECT_KIND=homebrew`).
 - NXEngine Cave Story engine on Retro-Go SD as `CaveStory.bin`.
 - Single `cavestory.nxpk` asset pack (8bpp sheets, decrypted TSC, music/SFX)
   flash-cached once and served via XIP.
-- CI builds `cavestory.nxpk` from the freeware English zip
-  (`https://www.cavestory.one/downloads/cavestoryen.zip`): extract
-  `Doukutsu.exe`, synthesize `drum.pcm` / `sndcache.pcm`, pack NXPK.
-- Release assets: `CaveStory-<tag>.zip` (`homebrews/*.bin` + `cavestory.nxpk`)
-  and `CaveStory-<tag>-debug.zip` (ELF + linker map).
+- CI builds one `cavestory[_xx].nxpk` per locale (`en`, `fr`, … from
+  `scripts/cavestory_locales.py`): extract `Doukutsu.exe`, synthesize
+  `drum.pcm` / `sndcache.pcm`, pack NXPK (French accents via extended
+  `smalfont.bmp`).
+- Release assets: one SD zip per language
+  (`CaveStory-<tag>-en.zip`, `CaveStory-<tag>-fr.zip`, …) each with
+  `homebrews/CaveStory.bin` + `homebrews/cavestory.nxpk`, plus
+  `CaveStory-<tag>-debug.zip` (ELF + linker map).
 - LUT8 LCD path, title cover packing, saves under `/data/homebrew/cavestory_*`.
 - Host build (`make host`) for desktop bring-up against the same pack.
 - Fix for flash-cache position hardfaults on large EXTFLASH (XIP pointers no
@@ -24,8 +27,8 @@ Initial Cave Story GWHB release (`PROJECT_KIND=homebrew`).
 
 ### Install
 
-- Unzip the release archive onto the SD root (creates `/homebrews/CaveStory.bin`
-  and `/homebrews/cavestory.nxpk`).
+- Pick a language zip (`CaveStory-<tag>-en.zip` or `-fr.zip`) and unzip onto
+  the SD root (creates `/homebrews/CaveStory.bin` and `/homebrews/cavestory.nxpk`).
 - Optional coverflow override: `/covers/homebrew/CaveStory.img` (JPEG ≤186×100,
   ≤10 KiB).
 - Requires firmware whose ABI matches `SDK_VERSION` in this repository.

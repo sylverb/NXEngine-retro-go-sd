@@ -60,6 +60,15 @@ def get_locale(locale_id: str) -> Locale:
     return LOCALES[key]
 
 
+def locale_ids() -> list[str]:
+    """Stable order for CI: English first, then the rest alphabetically."""
+    ids = sorted(LOCALES)
+    if "en" in ids:
+        ids.remove("en")
+        ids.insert(0, "en")
+    return ids
+
+
 def list_locales() -> None:
     for loc in LOCALES.values():
         print(f"  {loc.id:6}  {loc.nxpk:22}  {loc.kind:8}  {loc.name}")
@@ -68,4 +77,17 @@ def list_locales() -> None:
 
 
 if __name__ == "__main__":
-    list_locales()
+    import argparse
+
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument(
+        "--ids",
+        action="store_true",
+        help="print locale ids one per line (CI/Make)",
+    )
+    args = ap.parse_args()
+    if args.ids:
+        for loc_id in locale_ids():
+            print(loc_id)
+    else:
+        list_locales()

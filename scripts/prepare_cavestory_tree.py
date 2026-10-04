@@ -177,13 +177,22 @@ def prepare_english(outdir: Path, archive: Path | None, url: str, keep: bool) ->
         tree = find_doukutsu_tree(extract_root)
 
         canonical = outdir / "CaveStory"
+        # Keep host-built audio caches across locale re-prepares (CI multi-lang).
+        pcm_stash: dict[str, bytes] = {}
         if canonical.exists():
+            for name in ("drum.pcm", "sndcache.pcm"):
+                p = canonical / name
+                if p.is_file():
+                    pcm_stash[name] = p.read_bytes()
             shutil.rmtree(canonical)
         shutil.move(str(tree), str(canonical))
         shutil.rmtree(extract_root, ignore_errors=True)
 
         extract_from_doukutsu(canonical)
         copy_engine_files(canonical)
+        for name, data in pcm_stash.items():
+            (canonical / name).write_bytes(data)
+            print(f"  [keep] {name} ({len(data)} bytes)")
         return canonical
     finally:
         if tmp_dir is not None:

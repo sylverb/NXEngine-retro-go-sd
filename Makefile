@@ -150,7 +150,7 @@ include host/Makefile.nxengine_host
 LOCALE ?= en
 
 .PHONY: host_scaffold prepare-assets pack-assets prepare-cavestory-tree ci-assets \
-	pack-assets-fr list-locales
+	ci-assets-all pack-assets-fr list-locales
 host_scaffold:
 	$(MAKE) -f host/Makefile.host_scaffold host
 
@@ -180,9 +180,25 @@ ci-assets: host
 	$(V)./$(HOST_NX_BIN) --ci-prepare
 	$(V)$(MAKE) --no-print-directory pack-assets LOCALE=$(LOCALE)
 
+# Pack every locale in scripts/cavestory_locales.py (EN first, then overlays).
+# Audio caches are built once and kept across locale re-prepares.
+ci-assets-all: host
+	$(V)$(ECHO) "[ CS ]" CI asset pack (all locales)
+	$(V)first=1; \
+	for loc in $$(python3 scripts/cavestory_locales.py --ids); do \
+		$(ECHO) "[ CS ]" locale=$$loc; \
+		python3 scripts/prepare_cavestory_tree.py --locale $$loc; \
+		if [ $$first -eq 1 ]; then \
+			./$(HOST_NX_BIN) --ci-prepare; \
+			first=0; \
+		fi; \
+		$(MAKE) --no-print-directory pack-assets LOCALE=$$loc; \
+	done
+
 # Build NXPK (8bpp images + cleartext TSC) and copy to sd_content/homebrews/.
 # Runtime still loads /homebrews/cavestory.nxpk — rename/copy the locale file
-# on the SD card (e.g. cavestory_fr.nxpk → cavestory.nxpk).
+# on the SD card (e.g. cavestory_fr.nxpk → cavestory.nxpk). Release zips do
+# that rename for you (CaveStory-<tag>-<locale>.zip).
 pack-assets:
 	$(V)$(ECHO) "[ NXPK ]" locale=$(LOCALE)
 	$(V)python3 scripts/pack_cavestory_nxpk.py CaveStory --locale $(LOCALE) --also-sd
@@ -195,7 +211,9 @@ pack-assets:
 pack-assets-fr:
 	$(V)$(MAKE) --no-print-directory ci-assets LOCALE=fr
 
-.PHONY: print-NXPK
+.PHONY: print-NXPK print-LOCALE_IDS
 print-NXPK:
 	@python3 -c "import sys; sys.path.insert(0,'scripts'); from cavestory_locales import get_locale; \
 print('sd_content/homebrews/' + get_locale('$(LOCALE)').nxpk)"
+print-LOCALE_IDS:
+	@python3 scripts/cavestory_locales.py --ids

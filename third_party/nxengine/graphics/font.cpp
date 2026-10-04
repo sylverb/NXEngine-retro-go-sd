@@ -35,6 +35,10 @@ static const char bitmap_map[] = {		// letter order of bitmap font sheet
 	" !\"#$%&`()*+,-./0123456789:;<=>?"
 	"@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]%_"
 	"'abcdefghijklmnopqrstuvwxyz{|}~"
+	/* CP1252 / Latin-1 accents used by FR (and similar) TSC packs */
+	"\xC0\xC2\xC7\xC8\xC9\xCA\xCE\xD4"
+	"\xE0\xE2\xE7\xE8\xE9\xEA\xEE\xF4\xF9\xFB"
+	"\x9C\x92"	/* œ, ’ */
 };
 
 const char *bmpfontfile = "smalfont.bmp";
@@ -165,7 +169,7 @@ NXFont::~NXFont()
 
 void NXFont::free()
 {
-	for(int i=0;i<NUM_LETTERS_RENDERED;i++)
+	for(int i=0;i<NUM_FONT_LETTERS;i++)
 	{
 		if (letters[i]) SDL_FreeSurface(letters[i]);
 		letters[i] = NULL;
