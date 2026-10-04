@@ -35,10 +35,11 @@ static const char bitmap_map[] = {		// letter order of bitmap font sheet
 	" !\"#$%&`()*+,-./0123456789:;<=>?"
 	"@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]%_"
 	"'abcdefghijklmnopqrstuvwxyz{|}~"
-	/* CP1252 / Latin-1 accents used by FR (and similar) TSC packs */
-	"\xC0\xC2\xC7\xC8\xC9\xCA\xCE\xD4"
-	"\xE0\xE2\xE7\xE8\xE9\xEA\xEE\xF4\xF9\xFB"
-	"\x9C\x92"	/* œ, ’ */
+	/* CP1252 accents for FR/DE/ES/IT/NL/FI/PT (see scripts/extend_smalfont_latin.py) */
+	"\xC0\xC1\xC2\xC3\xC4\xC7\xC8\xC9\xCA\xCD\xCE\xD1\xD3\xD4\xD6\xDA"
+	"\xDC\xDF\xE0\xE1\xE2\xE3\xE4\xE7\xE8\xE9\xEA\xEB\xEC\xED\xEE\xEF"
+	"\xF1\xF2\xF3\xF4\xF5\xF6\xF9\xFA\xFB\xFC\x9C\xA1\xBF\xBA\x92\x93"
+	"\x94\x85"
 };
 
 const char *bmpfontfile = "smalfont.bmp";

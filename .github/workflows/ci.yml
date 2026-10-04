@@ -57,12 +57,13 @@ jobs:
           echo "TARGET_MAP=${TARGET_MAP}"
           echo "LOCALE_IDS=${LOCALE_IDS}"
 
-      - name: Install host deps (SDL 1.2 + Pillow + p7zip)
+      - name: Install host deps (SDL 1.2 + Pillow + p7zip + unrar)
         run: |
           set -euo pipefail
           sudo apt-get update
+          # unrar: Spanish Orden pack is .rar (p7zip cannot open all RAR variants)
           sudo apt-get install -y --no-install-recommends \
-            libsdl1.2-dev pkg-config python3-pip p7zip-full
+            libsdl1.2-dev pkg-config python3-pip p7zip-full unrar
           python3 -m pip install --user -r requirements.txt
 
       - name: Build GWHB binary (Docker)

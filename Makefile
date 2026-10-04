@@ -172,23 +172,26 @@ prepare-cavestory-tree:
 	$(V)python3 scripts/prepare_cavestory_tree.py --locale $(LOCALE)
 
 # Full asset pipeline: tree → host audio caches → cavestory[_xx].nxpk.
+# Prepare CaveStory/ *before* `make host` — host_nx_prepare needs data/npc.tbl.
 #   make ci-assets
 #   make ci-assets LOCALE=fr
-ci-assets: host
+ci-assets:
 	$(V)$(ECHO) "[ CS ]" CI asset pack locale=$(LOCALE)
 	$(V)python3 scripts/prepare_cavestory_tree.py --locale $(LOCALE)
+	$(V)$(MAKE) --no-print-directory host
 	$(V)./$(HOST_NX_BIN) --ci-prepare
 	$(V)$(MAKE) --no-print-directory pack-assets LOCALE=$(LOCALE)
 
 # Pack every locale in scripts/cavestory_locales.py (EN first, then overlays).
 # Audio caches are built once and kept across locale re-prepares.
-ci-assets-all: host
+ci-assets-all:
 	$(V)$(ECHO) "[ CS ]" CI asset pack (all locales)
 	$(V)first=1; \
 	for loc in $$(python3 scripts/cavestory_locales.py --ids); do \
 		$(ECHO) "[ CS ]" locale=$$loc; \
 		python3 scripts/prepare_cavestory_tree.py --locale $$loc; \
 		if [ $$first -eq 1 ]; then \
+			$(MAKE) --no-print-directory host; \
 			./$(HOST_NX_BIN) --ci-prepare; \
 			first=0; \
 		fi; \

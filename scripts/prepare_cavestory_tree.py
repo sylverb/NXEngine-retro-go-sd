@@ -64,8 +64,40 @@ def _find_7z() -> str | None:
     return None
 
 
+def _extract_rar(archive: Path, dest: Path) -> None:
+    """Extract .rar via bsdtar / unrar / unar / 7z (first that works)."""
+    attempts: list[list[str]] = []
+    for name in ("bsdtar", "tar"):
+        path = shutil.which(name)
+        if path:
+            attempts.append([path, "-xf", str(archive), "-C", str(dest)])
+            break
+    unrar = shutil.which("unrar")
+    if unrar:
+        attempts.append([unrar, "x", "-o+", str(archive), str(dest) + "/"])
+    unar = shutil.which("unar")
+    if unar:
+        attempts.append([unar, "-o", str(dest), str(archive)])
+    seven = _find_7z()
+    if seven:
+        attempts.append([seven, "x", f"-o{dest}", "-y", str(archive)])
+
+    errors: list[str] = []
+    for cmd in attempts:
+        proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        if proc.returncode == 0:
+            print(f"  rar via {cmd[0]}")
+            return
+        err = (proc.stderr or proc.stdout or "").strip().splitlines()
+        errors.append(f"{cmd[0]}: {err[-1] if err else proc.returncode}")
+    raise SystemExit(
+        f"failed to extract rar {archive.name}; tried: {'; '.join(errors)}. "
+        "Install unrar (apt/brew) or use bsdtar/libarchive."
+    )
+
+
 def extract_archive(archive: Path, dest: Path) -> None:
-    """Extract .zip / .7z / NSIS .exe into dest (must exist)."""
+    """Extract .zip / .7z / .rar / NSIS .exe into dest (must exist)."""
     dest.mkdir(parents=True, exist_ok=True)
     suffix = archive.suffix.lower()
     print(f"extract {archive.name} → {dest}")
@@ -97,6 +129,10 @@ def extract_archive(archive: Path, dest: Path) -> None:
                     )
             except OSError:
                 pass
+        return
+
+    if suffix == ".rar":
+        _extract_rar(archive, dest)
         return
 
     seven = _find_7z()
@@ -240,7 +276,13 @@ def prepare_overlay_locale(
             if not arch.is_file():
                 raise SystemExit(f"locale archive not found: {arch}")
         else:
-            suffix = ".7z" if locale_url.lower().endswith(".7z") else ".zip"
+            path_part = locale_url.split("?", 1)[0].lower()
+            if path_part.endswith(".7z"):
+                suffix = ".7z"
+            elif path_part.endswith(".rar"):
+                suffix = ".rar"
+            else:
+                suffix = ".zip"
             if keep:
                 arch = outdir / f"cavestory_locale{suffix}"
             else:

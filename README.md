@@ -10,8 +10,9 @@ Port of [EXL/NXEngine](https://github.com/EXL/NXEngine) (Cave Story engine) as a
 playable. Game data is a single **`cavestory.nxpk`** (~6 MiB) flash-cached once
 at boot; assets are XIP lookups (no per-file flash writes).
 
-In-game text language comes from the **`.nxpk` pack** you install (English or
-French today; more locales can be added in `scripts/cavestory_locales.py`).
+In-game text language comes from the **`.nxpk` pack** you install. Catalogued
+locales today: **en, de, es, fi, fr, it, nl, pt** (CP1252 / Latin-1 fan packs).
+CJK / Cyrillic / Turkish need engine font work and are not shipped yet.
 Tagged releases ship one SD zip per language.
 
 ## Build
@@ -39,24 +40,24 @@ make host && ./CaveStory_host --ci-prepare
 make pack-assets
 ```
 
-#### Other languages (French first)
+#### Other languages
 
 Fan translations are usually a `data/` overlay (scripts + some images). Music/SFX
-still come from the English `Doukutsu.exe` extract. Needs `p7zip`
-(`brew install p7zip` / `apt install p7zip-full`) for `.7z` locales.
+still come from the English `Doukutsu.exe` extract. Needs `p7zip` for `.7z`
+locales and `unrar` (or macOS `bsdtar`) for Spanish `.rar`.
 
 ```bash
-make list-locales           # en, fr, …
-make pack-assets-fr         # → sd_content/homebrews/cavestory_fr.nxpk
-# equivalent:
-make ci-assets LOCALE=fr
+make list-locales              # en de es fi fr it nl pt
+make ci-assets LOCALE=de       # one locale
+make ci-assets-all             # every catalogued locale (CI)
+make pack-assets-fr            # shortcut → cavestory_fr.nxpk
 ```
 
 On the SD card the homebrew always opens `/homebrews/cavestory.nxpk`. Release
-zips already use that name (`CaveStory-<tag>-fr.zip`, etc.). From a local pack:
+zips already use that name (`CaveStory-<tag>-de.zip`, etc.). From a local pack:
 
 ```bash
-cp sd_content/homebrews/cavestory_fr.nxpk /path/to/sd/homebrews/cavestory.nxpk
+cp sd_content/homebrews/cavestory_de.nxpk /path/to/sd/homebrews/cavestory.nxpk
 ```
 
 `pack-assets` converts 4bpp sheets to 8bpp, decrypts TSC offline, and packs
