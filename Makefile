@@ -185,7 +185,7 @@ ci-assets:
 # Pack every locale in scripts/cavestory_locales.py (EN first, then overlays).
 # Audio caches are built once and kept across locale re-prepares.
 ci-assets-all:
-	$(V)$(ECHO) "[ CS ]" CI asset pack (all locales)
+	$(V)$(ECHO) "[ CS ] CI asset pack (all locales)"
 	$(V)first=1; \
 	for loc in $$(python3 scripts/cavestory_locales.py --ids); do \
 		$(ECHO) "[ CS ]" locale=$$loc; \
