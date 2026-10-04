@@ -38,6 +38,7 @@ from prepare_cavestory_assets import (  # noqa: E402
 EXCLUDE_NAMES = {
     "doukutsu.exe",
     "doconfig.exe",
+    "doconffr.exe",
     "orgview.exe",
     "readme.txt",
     "manual.html",
@@ -46,9 +47,13 @@ EXCLUDE_NAMES = {
     "debug.txt",
     "thumbs.db",
     "cavestory.nxpk",
+    "cavestory_fr.nxpk",
+    "doukutsu",
+    "doukutsu.bin",
+    "doconfigure",
 }
-EXCLUDE_DIR_NAMES = {"manual", ".git"}
-EXCLUDE_SUFFIXES = {".exe"}
+EXCLUDE_DIR_NAMES = {"manual", "doc", "docs", ".git"}
+EXCLUDE_SUFFIXES = {".exe", ".bin", ".old", ".jpg", ".png", ".html", ".so", ".so.0"}
 
 
 def should_skip(rel: Path) -> bool:
@@ -62,6 +67,8 @@ def should_skip(rel: Path) -> bool:
         return True
     if name.endswith(".u8.bmp"):
         # Packed under the logical .pbm/.bmp name instead.
+        return True
+    if name.endswith(".nxpk"):
         return True
     # Profile / save slots stay on FatFs.
     if name.startswith("profile") and name.endswith(".dat"):
@@ -205,7 +212,12 @@ def main() -> int:
     ap.add_argument(
         "--also-sd",
         action="store_true",
-        help="Also copy to sd_content/homebrews/cavestory.nxpk",
+        help="Also copy to sd_content/homebrews/<output-name>",
+    )
+    ap.add_argument(
+        "--locale",
+        default=None,
+        help="locale id from cavestory_locales.py (sets default -o name)",
     )
     args = ap.parse_args()
     root = Path(args.root)
@@ -213,7 +225,14 @@ def main() -> int:
         print(f"error: not a directory: {root}", file=sys.stderr)
         return 1
 
-    out = Path(args.output) if args.output else root / "cavestory.nxpk"
+    default_name = "cavestory.nxpk"
+    if args.locale:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from cavestory_locales import get_locale
+
+        default_name = get_locale(args.locale).nxpk
+
+    out = Path(args.output) if args.output else root / default_name
     print(f"packing {root} → {out}")
     entries = collect_entries(root)
     if not entries:
@@ -222,7 +241,7 @@ def main() -> int:
     write_nxpk(entries, out)
 
     if args.also_sd:
-        sd = Path("sd_content/homebrews/cavestory.nxpk")
+        sd = Path("sd_content/homebrews") / out.name
         sd.parent.mkdir(parents=True, exist_ok=True)
         sd.write_bytes(out.read_bytes())
         print(f"copied → {sd}")

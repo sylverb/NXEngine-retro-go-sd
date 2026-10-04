@@ -146,7 +146,11 @@ docker_shell:
 #######################################
 include host/Makefile.nxengine_host
 
-.PHONY: host_scaffold prepare-assets pack-assets prepare-cavestory-tree ci-assets
+# Locale for asset packs: en (default), fr, … — see scripts/cavestory_locales.py
+LOCALE ?= en
+
+.PHONY: host_scaffold prepare-assets pack-assets prepare-cavestory-tree ci-assets \
+	pack-assets-fr list-locales
 host_scaffold:
 	$(MAKE) -f host/Makefile.host_scaffold host
 
@@ -155,29 +159,43 @@ prepare-assets:
 	$(V)$(ECHO) "[ ASSETS ]" prepare CaveStory *.u8.bmp
 	$(V)python3 scripts/prepare_cavestory_assets.py CaveStory
 
-# Download freeware zip + extract Doukutsu.exe + copy NXEngine support files.
+list-locales:
+	$(V)python3 scripts/cavestory_locales.py
+
+# Download freeware (+ optional translation overlay) + extract Doukutsu.exe.
 # Does not build drum.pcm / sndcache.pcm — use ./CaveStory_host --ci-prepare.
+# Examples:
+#   make prepare-cavestory-tree
+#   make prepare-cavestory-tree LOCALE=fr
 prepare-cavestory-tree:
-	$(V)$(ECHO) "[ CS ]" prepare CaveStory/ from cavestoryen.zip
-	$(V)python3 scripts/prepare_cavestory_tree.py
+	$(V)$(ECHO) "[ CS ]" prepare CaveStory/ locale=$(LOCALE)
+	$(V)python3 scripts/prepare_cavestory_tree.py --locale $(LOCALE)
 
-# Full asset pipeline for CI: tree → host audio caches → cavestory.nxpk.
+# Full asset pipeline: tree → host audio caches → cavestory[_xx].nxpk.
+#   make ci-assets
+#   make ci-assets LOCALE=fr
 ci-assets: host
-	$(V)$(ECHO) "[ CS ]" CI asset pack
-	$(V)python3 scripts/prepare_cavestory_tree.py
+	$(V)$(ECHO) "[ CS ]" CI asset pack locale=$(LOCALE)
+	$(V)python3 scripts/prepare_cavestory_tree.py --locale $(LOCALE)
 	$(V)./$(HOST_NX_BIN) --ci-prepare
-	$(V)$(MAKE) --no-print-directory pack-assets
+	$(V)$(MAKE) --no-print-directory pack-assets LOCALE=$(LOCALE)
 
-# Build cavestory.nxpk (8bpp images + cleartext TSC) and copy to sd_content.
+# Build NXPK (8bpp images + cleartext TSC) and copy to sd_content/homebrews/.
+# Runtime still loads /homebrews/cavestory.nxpk — rename/copy the locale file
+# on the SD card (e.g. cavestory_fr.nxpk → cavestory.nxpk).
 pack-assets:
-	$(V)$(ECHO) "[ NXPK ]" CaveStory/cavestory.nxpk
-	$(V)python3 scripts/pack_cavestory_nxpk.py CaveStory --also-sd
+	$(V)$(ECHO) "[ NXPK ]" locale=$(LOCALE)
+	$(V)python3 scripts/pack_cavestory_nxpk.py CaveStory --locale $(LOCALE) --also-sd
 	$(V)mkdir -p sd_content/homebrews
 	$(V)if [ -f $(PACKED_BIN) ]; then \
 		cp -f $(PACKED_BIN) sd_content/homebrews/$(PACKED_BIN); \
 		$(ECHO) "[ SD ]" sd_content/homebrews/$(PACKED_BIN); \
 	fi
 
+pack-assets-fr:
+	$(V)$(MAKE) --no-print-directory ci-assets LOCALE=fr
+
 .PHONY: print-NXPK
 print-NXPK:
-	@echo sd_content/homebrews/cavestory.nxpk
+	@python3 -c "import sys; sys.path.insert(0,'scripts'); from cavestory_locales import get_locale; \
+print('sd_content/homebrews/' + get_locale('$(LOCALE)').nxpk)"

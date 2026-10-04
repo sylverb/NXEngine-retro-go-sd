@@ -25,20 +25,41 @@ make host                   # → CaveStory_host (desktop NXEngine)
 ### Game data (`cavestory.nxpk`)
 
 CI downloads the freeware English zip from
-[cavestory.one](https://www.cavestory.one/downloads/cavestoryen.zip), extracts
+[cavestory.one](https://www.cavestory.one/download/cave-story.php), extracts
 embedded assets from `Doukutsu.exe`, builds `drum.pcm` / `sndcache.pcm`, then
 packs `cavestory.nxpk`. Locally:
 
 ```bash
-make ci-assets              # download + extract + host --ci-prepare + pack-assets
+make ci-assets              # EN: download + extract + host --ci-prepare + pack-assets
 # or step by step:
-python3 scripts/prepare_cavestory_tree.py   # needs network (or --zip path)
+python3 scripts/prepare_cavestory_tree.py   # needs network (or --archive path)
 make host && ./CaveStory_host --ci-prepare
 make pack-assets
 ```
 
+#### Other languages (French first)
+
+Fan translations from [cavestory.one](https://www.cavestory.one/download/cave-story.php)
+are usually a `data/` overlay (scripts + some images). Music/SFX still come from
+the English `Doukutsu.exe` extract. Needs `p7zip` (`brew install p7zip` /
+`apt install p7zip-full`) for `.7z` locales.
+
+```bash
+make list-locales           # en, fr, …
+make pack-assets-fr         # → sd_content/homebrews/cavestory_fr.nxpk
+# equivalent:
+make ci-assets LOCALE=fr
+```
+
+On the SD card the homebrew always opens `/homebrews/cavestory.nxpk`. To play
+French, copy/rename the locale pack:
+
+```bash
+cp sd_content/homebrews/cavestory_fr.nxpk /path/to/sd/homebrews/cavestory.nxpk
+```
+
 `pack-assets` converts 4bpp sheets to 8bpp, decrypts TSC offline, and packs
-everything into `cavestory.nxpk`. Optional `make prepare-assets` still writes
+everything into the locale `.nxpk`. Optional `make prepare-assets` still writes
 loose `*.u8.bmp` siblings for host debugging.
 
 Desktop needs SDL 1.2 (`brew install sdl12-compat`) for the interactive host
