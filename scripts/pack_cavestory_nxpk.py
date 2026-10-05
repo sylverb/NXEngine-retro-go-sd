@@ -48,6 +48,8 @@ EXCLUDE_NAMES = {
     "thumbs.db",
     "cavestory.nxpk",
     "cavestory_fr.nxpk",
+    "cavestory_ja.nxpk",
+    "cavestory_ko.nxpk",
     "doukutsu",
     "doukutsu.bin",
     "doconfigure",
@@ -91,8 +93,43 @@ def tsc_decrypt_bytes(data: bytes) -> bytes:
     return bytes(buf)
 
 
+def tsc_encrypt_bytes(plain: bytes) -> bytes:
+    """Inverse of tsc_decrypt; mid-byte is the key (= original mid plaintext)."""
+    if not plain:
+        return plain
+    buf = bytearray(plain)
+    keypos = len(buf) // 2
+    dkey = buf[keypos]
+    for i in range(keypos):
+        buf[i] = (buf[i] + dkey) & 0xFF
+    for i in range(keypos + 1, len(buf)):
+        buf[i] = (buf[i] + dkey) & 0xFF
+    return bytes(buf)
+
+
 def normalize_rel(path: Path) -> str:
     return path.as_posix()
+
+
+def convert_tsc_to_utf8(data: bytes, encoding: str) -> bytes:
+    """Decrypt → decode locale encoding → UTF-8 cleartext for NXPK.
+
+    Idempotent: if the decrypted payload is already valid UTF-8 (re-pack),
+    return it as-is — never re-decode as cp932/cp949 (that mangled kanji).
+    """
+    dec = tsc_decrypt_bytes(data)
+    try:
+        text = dec.decode("utf-8")
+    except UnicodeDecodeError:
+        text = None
+    if text is not None and "\x00" not in text:
+        # Heuristic: valid UTF-8 with CJK / non-ASCII already converted.
+        if encoding.lower() in ("utf-8", "utf8") or any(ord(c) > 0x7F for c in text):
+            return text.encode("utf-8")
+        # Pure ASCII also fine to keep.
+        return text.encode("utf-8")
+    text = dec.decode(encoding, errors="replace")
+    return text.encode("utf-8")
 
 
 def _bmp_to_u8_bytes(path: Path, convert_fn) -> bytes:
@@ -131,7 +168,13 @@ def image_blob_for(path: Path) -> bytes | None:
     return path.read_bytes()
 
 
-def collect_entries(root: Path) -> list[tuple[str, bytes]]:
+def collect_entries(
+    root: Path,
+    *,
+    text_encoding: str = "cp1252",
+    cjk: bool = False,
+    rewrite_disk_tsc: bool = False,
+) -> list[tuple[str, bytes]]:
     entries: list[tuple[str, bytes]] = []
     seen: set[str] = set()
 
@@ -147,8 +190,16 @@ def collect_entries(root: Path) -> list[tuple[str, bytes]]:
 
         data: bytes
         if path.suffix.lower() == ".tsc":
-            data = tsc_decrypt_bytes(path.read_bytes())
-            kind = "tsc-clear"
+            raw = path.read_bytes()
+            if cjk:
+                data = convert_tsc_to_utf8(raw, text_encoding)
+                kind = "tsc-utf8"
+                if rewrite_disk_tsc:
+                    # Host fileopen path: encrypted UTF-8 (identity-safe mid key).
+                    path.write_bytes(tsc_encrypt_bytes(data))
+            else:
+                data = tsc_decrypt_bytes(raw)
+                kind = "tsc-clear"
         else:
             img = image_blob_for(path)
             if img is not None:
@@ -166,6 +217,31 @@ def collect_entries(root: Path) -> list[tuple[str, bytes]]:
         print(f"  [{kind:9}] {key} ({len(data)} bytes)")
 
     return entries
+
+
+def bake_cjk_for_root(root: Path, locale_id: str) -> Path:
+    """Run bake_cjk_atlas.py against UTF-8 (or legacy) TSC; return cjkfont.dat path."""
+    import subprocess
+
+    script = Path(__file__).resolve().parent / "bake_cjk_atlas.py"
+    out = root / "cjkfont.dat"
+    # TSC may already be rewritten to UTF-8 on disk when rewrite_disk_tsc ran first.
+    # Bake scans files — prefer --codepoints-from-utf8 after conversion.
+    cmd = [
+        sys.executable,
+        str(script),
+        str(root),
+        "-o",
+        str(out),
+        "--locale",
+        locale_id,
+        "--codepoints-from-utf8",
+    ]
+    print(f"[CJK] baking atlas via {' '.join(cmd)}")
+    subprocess.run(cmd, check=True)
+    if not out.is_file():
+        raise SystemExit(f"cjkfont bake failed: missing {out}")
+    return out
 
 
 def write_nxpk(entries: list[tuple[str, bytes]], out: Path) -> None:
@@ -226,15 +302,38 @@ def main() -> int:
         return 1
 
     default_name = "cavestory.nxpk"
+    loc = None
     if args.locale:
         sys.path.insert(0, str(Path(__file__).resolve().parent))
         from cavestory_locales import get_locale
 
-        default_name = get_locale(args.locale).nxpk
+        loc = get_locale(args.locale)
+        default_name = loc.nxpk
 
     out = Path(args.output) if args.output else root / default_name
     print(f"packing {root} → {out}")
-    entries = collect_entries(root)
+
+    text_encoding = loc.text_encoding if loc else "cp1252"
+    cjk = bool(loc.cjk) if loc else False
+
+    # CJK: convert TSC → UTF-8 on disk first so the atlas scanner sees Unicode,
+    # bake cjkfont.dat, then pack (tsc entries use the converted UTF-8).
+    if cjk:
+        print(f"[CJK] converting TSC {text_encoding} → UTF-8")
+        for path in sorted(root.rglob("*.tsc")):
+            rel = path.relative_to(root)
+            if should_skip(rel):
+                continue
+            utf8 = convert_tsc_to_utf8(path.read_bytes(), text_encoding)
+            path.write_bytes(tsc_encrypt_bytes(utf8))
+        bake_cjk_for_root(root, loc.id if loc else "ja")
+
+    entries = collect_entries(
+        root,
+        text_encoding="utf-8" if cjk else text_encoding,
+        cjk=cjk,
+        rewrite_disk_tsc=False,
+    )
     if not entries:
         print("error: no files packed", file=sys.stderr)
         return 1

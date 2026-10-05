@@ -55,8 +55,8 @@ public:
 			return;
 
 #ifdef NXENGINE_GW
-		/* Bump pools cannot free the old block on grow. Exact size-per-put
-		 * (script #1..N) would O(n²)-leak RAM_EMU/bonus. Double capacity. */
+		/* Bump pointer table — keep across TRA (MakeEmpty cannot reclaim bump).
+		 * Double capacity to avoid O(n²) stranded copies on grow. */
 		int newcap = nitems ? nitems : 16;
 		while (newcap < allocnum) {
 			if (newcap > 65536)

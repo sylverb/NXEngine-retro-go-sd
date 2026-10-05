@@ -19,6 +19,10 @@ class FloatText
 public:
 	FloatText(int sprite);
 	~FloatText();
+#ifdef NXENGINE_GW
+	void *operator new(size_t sz);
+	void operator delete(void *p);
+#endif
 	void Reset();
 	
 	void AddQty(int amt);

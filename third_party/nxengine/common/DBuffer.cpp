@@ -6,6 +6,22 @@
 #include "DBuffer.h"
 #include "DBuffer.fdh"
 
+#ifdef NXENGINE_GW
+int dbuf_ahb_mode = 0;
+
+void *DBuffer::operator new(size_t n)
+{
+	if (dbuf_ahb_mode)
+		return gw_calloc_ahb(1, n);
+	return ::operator new(n);
+}
+
+void DBuffer::operator delete(void *p)
+{
+	/* AHB scripts free; bump (Head/ArmsItem) is a no-op. */
+	gw_free_ahb(p);
+}
+#endif
 
 DBuffer::DBuffer()
 {

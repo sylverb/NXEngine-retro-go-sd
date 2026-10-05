@@ -36,6 +36,11 @@ Object *CreateObject(int x, int y, int type);
 Object *CreateObject(int x, int y, int type, int xinertia, int yinertia, \
 					int dir=0, Object *linkedobject=NULL, uint32_t createflags=CF_DEFAULT);
 
+#ifdef NXENGINE_GW
+Object *gw_obj_alloc(void);
+void gw_obj_free(Object *o);
+#endif
+
 
 // ObjProp definitions
 struct ObjProp

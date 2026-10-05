@@ -14,6 +14,9 @@
 #include <unistd.h>
 #include "graphics/safemode.h"
 #include "main.fdh"
+#ifdef NXENGINE_GW
+#include "gw_mem.h"
+#endif
 #if !defined(NXENGINE_GW)
 #include "platform/gw_pack.h"
 #endif
@@ -104,6 +107,9 @@ bool freshstart;
 	
 	if (Graphics::init(settings->resolution)) { staterr("Failed to initialize graphics."); return 1; }
 	if (font_init()) { staterr("Failed to load font."); return 1; }
+#ifdef NXENGINE_GW
+	gw_mem_log("after-font");
+#endif
 	
 	//speed_test();
 	//return 1;
@@ -139,6 +145,9 @@ bool freshstart;
 	if (Carets::init()) { fatal("Failed to initialize carets."); return 1; }
 	
 	if (game.init()) return 1;
+#ifdef NXENGINE_GW
+	gw_mem_log("after-init");
+#endif
 	game.setmode(GM_NORMAL);
 	// set null stage just to have something to do while we go to intro
 	game.switchstage.mapno = 0;

@@ -146,6 +146,36 @@ def extract_archive(archive: Path, dest: Path) -> None:
         check=True,
         capture_output=True,
     )
+    # Nested PE "compound" archives (e.g. Korean PatchProgram SFX): 7z -t#
+    _unwrap_pe_compounds(dest)
+
+
+def _unwrap_pe_compounds(dest: Path) -> None:
+    """If extract only yielded a PE patcher, split it with `7z -t#`."""
+    seven = _find_7z()
+    if seven is None:
+        return
+    if any(dest.rglob("Head.tsc")):
+        return
+    for exe in list(dest.rglob("*.exe")):
+        if exe.stat().st_size < 100_000:
+            continue
+        out = dest / f"_pe_{exe.stem}"
+        out.mkdir(parents=True, exist_ok=True)
+        probe = subprocess.run(
+            [seven, "l", "-t#", str(exe)],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if probe.returncode != 0:
+            continue
+        print(f"  unpacking PE compound {exe.name}")
+        subprocess.run(
+            [seven, "x", "-t#", f"-o{out}", "-y", str(exe)],
+            check=False,
+            capture_output=True,
+        )
 
 
 def find_doukutsu_tree(root: Path) -> Path:
@@ -167,6 +197,18 @@ def find_data_root(root: Path) -> Path:
             return h.parent.parent
     if hits:
         return hits[0].parent
+
+    # Helpful hint for the Korean PatchProgram on cavestory.one.
+    exes = [p.name for p in root.rglob("*.exe")]
+    if any("translation" in n.lower() or "patch" in n.lower() for n in exes):
+        raise SystemExit(
+            "no data/Head.tsc in locale archive — this looks like a Windows "
+            "PatchProgram (e.g. cavestory_k.7z), not a data overlay.\n"
+            "Apply it to Japanese Doukutsu 1.0.0.6 on Windows, zip the resulting "
+            "data/ tree, then rerun:\n"
+            "  python3 scripts/prepare_cavestory_tree.py --locale ko "
+            "--archive korean_data.zip"
+        )
     raise SystemExit("no data/Head.tsc in locale archive (not a Cave Story data pack?)")
 
 
@@ -180,18 +222,26 @@ def copy_engine_files(tree: Path) -> None:
         print(f"  [engine] {name}")
 
 
-def extract_from_doukutsu(tree: Path) -> None:
+def extract_from_doukutsu(tree: Path, *, check_crc: bool = True) -> None:
     exe = tree / "Doukutsu.exe"
     if not exe.is_file():
         raise SystemExit(f"missing {exe}")
     print(f"extracting from {exe}")
     blob = exe.read_bytes()
-    extract_files(blob, tree)
+    # JP freeware shares offsets with EN 1.0.0.6 but credit BMP CRCs differ.
+    extract_files(blob, tree, check_crc=check_crc)
     extract_pxt(blob, tree)
     extract_stages(blob, tree)
 
 
-def prepare_english(outdir: Path, archive: Path | None, url: str, keep: bool) -> Path:
+def prepare_english(
+    outdir: Path,
+    archive: Path | None,
+    url: str,
+    keep: bool,
+    *,
+    check_crc: bool = True,
+) -> Path:
     tmp_dir = None
     try:
         if archive is not None:
@@ -224,7 +274,7 @@ def prepare_english(outdir: Path, archive: Path | None, url: str, keep: bool) ->
         shutil.move(str(tree), str(canonical))
         shutil.rmtree(extract_root, ignore_errors=True)
 
-        extract_from_doukutsu(canonical)
+        extract_from_doukutsu(canonical, check_crc=check_crc)
         copy_engine_files(canonical)
         for name, data in pcm_stash.items():
             (canonical / name).write_bytes(data)
@@ -265,9 +315,13 @@ def prepare_overlay_locale(
     locale_url: str,
     base_url: str,
     keep: bool,
+    *,
+    base_check_crc: bool = True,
 ) -> Path:
-    # 1) English base with Doukutsu extract
-    tree = prepare_english(outdir, archive=None, url=base_url, keep=keep)
+    # 1) Full base (usually EN; KO uses JA) with Doukutsu extract
+    tree = prepare_english(
+        outdir, archive=None, url=base_url, keep=keep, check_crc=base_check_crc
+    )
 
     tmp_dir = None
     try:
@@ -353,16 +407,23 @@ def main() -> int:
     print(f"locale={loc.id} ({loc.name}) kind={loc.kind}")
     print(f"nxpk target name: {loc.nxpk}")
 
+    # EN AGTP CRCs are authoritative; JP freeware differs in credit BMPs.
+    check_crc = not loc.cjk and loc.id != "ja"
+
     if loc.kind == "full":
-        tree = prepare_english(outdir, args.archive, url, args.keep_zip)
+        tree = prepare_english(
+            outdir, args.archive, url, args.keep_zip, check_crc=check_crc
+        )
     elif loc.kind == "overlay":
-        base = get_locale("en")
+        base = get_locale(loc.base_locale or "en")
+        base_check_crc = not base.cjk and base.id != "ja"
         tree = prepare_overlay_locale(
             outdir,
             locale_archive=args.archive,
             locale_url=url,
             base_url=base.url,
             keep=args.keep_zip,
+            base_check_crc=base_check_crc,
         )
     else:
         raise SystemExit(f"unsupported locale kind: {loc.kind}")

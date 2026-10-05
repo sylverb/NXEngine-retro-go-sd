@@ -201,7 +201,7 @@ ci-assets-all:
 # Build NXPK (8bpp images + cleartext TSC) and copy to sd_content/homebrews/.
 # Runtime still loads /homebrews/cavestory.nxpk — rename/copy the locale file
 # on the SD card (e.g. cavestory_fr.nxpk → cavestory.nxpk). Release zips do
-# that rename for you (CaveStory-<tag>-<locale>.zip).
+# that rename for you (CaveStory-<locale>-<tag>.zip).
 pack-assets:
 	$(V)$(ECHO) "[ NXPK ]" locale=$(LOCALE)
 	$(V)python3 scripts/pack_cavestory_nxpk.py CaveStory --locale $(LOCALE) --also-sd

@@ -142,7 +142,9 @@ Dialog *dlg = opt.dlg;
 	
     dlg->AddItem(LC_RES, _res_change, _res_get);
     dlg->AddItem(LC_KEYS, EnterControlsMenu);
+#ifndef NXENGINE_GW
     dlg->AddItem(LC_REPLAY, EnterReplayMenu);
+#endif
 	
 	dlg->AddSeparator();
 #if defined (_DINGUX) || defined (_MOTOMAGX) || defined (_MOTOEZX)

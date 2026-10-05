@@ -64,6 +64,7 @@ struct stMap
 extern stMap map;
 
 void map_focus(Object *o, int spd = 16);
+void map_flush_graphics();
 
 // background scrolling types
 #define BK_FIXED			0		// backdrop does not scroll

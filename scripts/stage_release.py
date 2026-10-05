@@ -2,7 +2,7 @@
 """Stage Retro-Go SD release assets for the active project kind.
 
 Reads PROJECT_KIND and PACKED_BIN from the root Makefile, builds:
-  1. Per-locale SD install zips: <stem>-<tag>-<locale>.zip
+  1. Per-locale SD install zips: <stem>-<locale>-<tag>.zip
         → homebrews|cores/<packed.bin>
         → homebrews|cores/cavestory.nxpk  (runtime name; locale baked in)
   2. Debug symbols zip: <stem>-<tag>-debug.zip → ELF, map, README
@@ -262,7 +262,7 @@ def stage_release(
         staged_nxpk = sd_root / f"cavestory_{loc_id}.nxpk"
         shutil.copy2(nxpk, staged_nxpk)
 
-        archive_name = f"{stem}-{tag_slug}-{loc_id}.zip"
+        archive_name = f"{stem}-{loc_id}-{tag_slug}.zip"
         archive_path = out_dir / archive_name
         write_zip(
             archive_path,

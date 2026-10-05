@@ -2,6 +2,8 @@
 #include "../nx.h"
 #include "TextBox.h"
 #include "TextBox.fdh"
+#include "../graphics/cjkfont.h"
+#include <string.h>
 
 #define MAXLINELEN_FACE		26
 #define MAXLINELEN_NO_FACE	35
@@ -105,7 +107,10 @@ void TextBox::AddText(const char *str)
 		return;
 	
 	for(int i=0;str[i];i++)
-		fCharsWaiting[fCWHead++] = str[i];
+	{
+		fCharsWaiting[fCWHead] = str[i];
+		fCWHead = (uint16_t)((fCWHead + 1) & CW_MASK);
+	}
 }
 
 
@@ -272,7 +277,8 @@ void TextBox::DrawTextBox()
 	}
 	
 	// draw text lines (the 4th line is for the first char shown on the new line during scrolling)
-	int char_spacing = (fFlags & TB_VARIABLE_WIDTH_CHARS) ? 0 : 6;
+	/* CJK packs use proportional glyph advances; Latin keeps classic 6px grid. */
+	int char_spacing = (fFlags & TB_VARIABLE_WIDTH_CHARS) || cjkfont_loaded() ? 0 : 6;
 	int y = (text_top + fTextYOffset);
 	
 	for(int i=0;i<MSG_NLINES;i++)
@@ -299,11 +305,79 @@ void TextBox::DrawTextBox()
 void TextBox::AddNextChar(void)
 {
 	bool line_at_once = (fFlags & TB_LINE_AT_ONCE);
+	bool utf8 = cjkfont_loaded();
 	int maxlinelen = GetMaxLineLen();
+	int max_px = GetFontMaxLineWidth(fFace != 0);
+	const int line_cap = (int)sizeof(fLines[0]) - 8;
 	
 	while(fCWHead != fCWTail)
 	{
-		char ch = fCharsWaiting[fCWTail++];
+		if (utf8)
+		{
+			/* Peek / consume one UTF-8 sequence (or CR/LF). */
+			uint16_t peek = fCWTail;
+			char seq[5];
+			int sequ = 0;
+			unsigned char b0 = (unsigned char)fCharsWaiting[peek];
+			peek = (uint16_t)((peek + 1) & CW_MASK);
+			if (b0 == 10) { fCWTail = peek; continue; }
+
+			if (b0 == 13) {
+				fCWTail = peek;
+				fCurLineLen = 0;
+				fCurLine++;
+				if (fCurLine >= MSG_NLINES - 1)
+					fScrolling = true;
+				if (line_at_once)
+					break;
+				continue;
+			}
+
+			seq[sequ++] = (char)b0;
+			int need = 1;
+			if ((b0 & 0xE0) == 0xC0) need = 2;
+			else if ((b0 & 0xF0) == 0xE0) need = 3;
+			else if ((b0 & 0xF8) == 0xF0) need = 4;
+			while (sequ < need && peek != fCWHead) {
+				unsigned char c = (unsigned char)fCharsWaiting[peek];
+				if ((c & 0xC0) != 0x80)
+					break;
+				seq[sequ++] = (char)c;
+				peek = (uint16_t)((peek + 1) & CW_MASK);
+			}
+			seq[sequ] = 0;
+			fCWTail = peek;
+
+			int spacing = (fFlags & TB_VARIABLE_WIDTH_CHARS) || utf8 ? 0 : 6;
+			int next_w = GetFontWidth(seq, spacing);
+			int cur_w = fCurLineLen ? GetFontWidth(fLines[fCurLine], spacing) : 0;
+			if (fCurLineLen > 0 && (cur_w + next_w) > max_px)
+			{
+				fCurLineLen = 0;
+				fCurLine++;
+				if (fCurLine >= MSG_NLINES - 1)
+					fScrolling = true;
+			}
+
+			if (!line_at_once)
+				sound(SND_MSG);
+
+			if (fCurLineLen + sequ >= line_cap)
+				break;
+			memcpy(fLines[fCurLine] + fCurLineLen, seq, (size_t)sequ + 1);
+			fCurLineLen += sequ;
+
+			if (fCurLine >= MSG_NLINES - 1)
+				fScrolling = true;
+
+			if (line_at_once)
+				continue;
+			else
+				break;
+		}
+
+		char ch = fCharsWaiting[fCWTail];
+		fCWTail = (uint16_t)((fCWTail + 1) & CW_MASK);
 		if (ch == 10) continue;	// ignore LF's, we look only for CR
 		
 		// go to next line on CR's, or wrap text if needed

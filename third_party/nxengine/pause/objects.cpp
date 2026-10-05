@@ -26,7 +26,11 @@ void Options::close_objects()
 	while(o)
 	{
 		Object *next = o->next;
+#ifdef NXENGINE_GW
+		gw_obj_free(o);
+#else
 		delete o;
+#endif
 		o = next;
 	}
 	
@@ -52,7 +56,11 @@ void (*ai_routine[])(Object *) = {
 		if (o->deleted)
 		{
 			LL_REMOVE(o, prev, next, firstobj, lastobj);
+#ifdef NXENGINE_GW
+			gw_obj_free(o);
+#else
 			delete o;
+#endif
 		}
 		else if (o->sprite != SPR_NULL)
 		{
@@ -70,7 +78,13 @@ Object *Options::create_object(int x, int y, int type)
 {
 static Object ZERO;
 
+#ifdef NXENGINE_GW
+	Object *o = gw_obj_alloc();
+#else
 	Object *o = new Object;
+#endif
+	if (!o)
+		return NULL;
 	*o = ZERO;
 	
 	o->x = x;

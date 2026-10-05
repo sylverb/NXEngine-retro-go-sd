@@ -12,6 +12,10 @@ Caret *firstcaret = NULL;
 Caret *lastcaret = NULL;
 static int _effecttype = EFFECT_NONE;
 
+#ifdef NXENGINE_GW
+static Caret *s_caret_free;
+#endif
+
 
 bool Carets::init(void)
 {
@@ -32,9 +36,18 @@ void c------------------------------() {}
 Caret *CreateCaret(int x, int y, int sprite, void (*ontick)(Caret *c), \
 				   int xinertia, int yinertia)
 {
+#ifdef NXENGINE_GW
+	Caret *c = s_caret_free;
+	if (c)
+		s_caret_free = c->next;
+	else
+		c = new Caret;
+#else
 	Caret *c = new Caret;
+#endif
 	if (!c)
 		return NULL;
+	/* new Caret may leave vptr; memset after is intentional (POD-like). */
 	memset(c, 0, sizeof(Caret));
 	
 	c->x = x;
@@ -59,7 +72,12 @@ void Caret::Destroy()
 	if (!this)
 		return;
 	LL_REMOVE(this, prev, next, firstcaret, lastcaret);
+#ifdef NXENGINE_GW
+	this->next = s_caret_free;
+	s_caret_free = this;
+#else
 	delete this;
+#endif
 }
 
 void Caret::MoveAtDir(int dir, int speed)

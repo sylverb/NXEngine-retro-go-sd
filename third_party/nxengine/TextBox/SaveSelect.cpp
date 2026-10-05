@@ -1,4 +1,3 @@
-
 /*
 	The save select box (for multiple save files).
 */
@@ -11,19 +10,11 @@
 #include "SaveSelect.h"
 #include "SaveSelect.fdh"
 
-#ifdef NXENGINE_GW
-#include "gw_malloc.h"
-#endif
-
 // moved here as static data so that the compiler will shut up about a circular dependency
 // that happens if you try to include profile.h from SaveSelect.h.
-#ifdef NXENGINE_GW
-static Profile *fProfiles;
-static bool *fHaveProfile;
-#else
-static Profile fProfiles[MAX_SAVE_SLOTS];
+// ProfilePreview omits flags[8000] — 5 slots are ~2 KiB BSS, not a 43 KiB heap grab.
+static ProfilePreview fProfiles[MAX_SAVE_SLOTS];
 static bool fHaveProfile[MAX_SAVE_SLOTS];
-#endif
 int fPicXOffset;
 
 TB_SaveSelect::TB_SaveSelect()
@@ -62,27 +53,11 @@ void TB_SaveSelect::SetVisible(bool enable, bool saving)
 	fCurSel = settings->last_save_slot;
 	fPicXOffset = -24;
 	
-#ifdef NXENGINE_GW
-	if (!fProfiles) {
-		fProfiles = (Profile *)ahb_calloc(MAX_SAVE_SLOTS, sizeof(Profile));
-		if (!fProfiles) fProfiles = (Profile *)ram_calloc(MAX_SAVE_SLOTS, sizeof(Profile));
-	}
-	if (!fHaveProfile) {
-		fHaveProfile = (bool *)ahb_calloc(MAX_SAVE_SLOTS, sizeof(bool));
-		if (!fHaveProfile) fHaveProfile = (bool *)ram_calloc(MAX_SAVE_SLOTS, sizeof(bool));
-	}
-	if (!fProfiles || !fHaveProfile) {
-		staterr("SaveSelect: OOM profiles");
-		fVisible = false;
-		return;
-	}
-	memset(fHaveProfile, 0, MAX_SAVE_SLOTS * sizeof(bool));
-#else
 	memset(fHaveProfile, 0, sizeof(fHaveProfile));
-#endif
+	memset(fProfiles, 0, sizeof(fProfiles));
 	for(int i=0;i<fNumFiles;i++)
 	{
-		if (!profile_load(GetProfileName(i), &fProfiles[i]))
+		if (!profile_load_preview(GetProfileName(i), &fProfiles[i]))
 			fHaveProfile[i] = true;
 	}
 	
@@ -162,7 +137,7 @@ int start;
 
 void TB_SaveSelect::DrawProfile(int x, int y, int index)
 {
-Profile *p = &fProfiles[index];
+ProfilePreview *p = &fProfiles[index];
 const int w = fCoords.w - 33;
 
 	int sidewd = sprites[SPR_SAVESELECTOR_SIDES].w;
@@ -195,7 +170,7 @@ const int w = fCoords.w - 33;
 
 void TB_SaveSelect::DrawExtendedInfo()
 {
-Profile *p = &fProfiles[fCurSel];
+ProfilePreview *p = &fProfiles[fCurSel];
 int x, y, s;
 	
 	if (fPicXOffset < 0)
@@ -315,7 +290,7 @@ int x, y, s;
 
 // I don't think it's possible to get 3-digit max life
 // without hacking, but I accounted for it anyway.
-static void DrawHealth(int xright, int y, Profile *p)
+static void DrawHealth(int xright, int y, ProfilePreview *p)
 {
 int hx, len;
 	
@@ -355,6 +330,5 @@ void TB_SaveSelect::Draw(void)
 	}
 	
 	// draw extended info for current selection
-	if (fHaveProfile[fCurSel])
-		DrawExtendedInfo();
+	DrawExtendedInfo();
 }

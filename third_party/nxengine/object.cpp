@@ -30,6 +30,10 @@ Object * const &o = this;
 	o->deleted = true;
 }
 
+#ifdef NXENGINE_GW
+void gw_player_free(Player *p);
+#endif
+
 void Object::Destroy()
 {
 Object * const &o = this;
@@ -37,7 +41,8 @@ Object * const &o = this;
 	// make sure no pointers are pointing at us
 	DisconnectGamePointers();
 	// delete associated floaty text as soon as it's animation is done
-	DamageText->ObjectDestroyed = true;
+	if (DamageText)
+		DamageText->ObjectDestroyed = true;
 	
 	// if any objects are linked to this obj then unlink them
 	Object *link;
@@ -52,7 +57,14 @@ Object * const &o = this;
 	LL_REMOVE(o, lower, higher, lowestobject, highestobject);
 	if (o == player) player = NULL;
 	
+#ifdef NXENGINE_GW
+	if (o->type == OBJ_PLAYER)
+		gw_player_free((Player *)o);
+	else
+		gw_obj_free(o);
+#else
 	delete o;
+#endif
 }
 
 // checks all the games pointers that point to an object

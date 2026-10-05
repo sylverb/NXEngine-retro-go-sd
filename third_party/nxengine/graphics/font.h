@@ -32,6 +32,9 @@ public:
 	
 	bool InitBitmapChars(SDL_Surface *sheet, uint32_t fgcolor, uint32_t color);
 	bool InitBitmapCharsShadowed(SDL_Surface *sheet, uint32_t fgcolor, uint32_t color, uint32_t shadowcolor);
+
+	/* Alias another font's letter surfaces (no extra RAM; free() is a no-op). */
+	void BorrowLetters(const NXFont &other);
 	
 	void free();
 	
@@ -39,6 +42,7 @@ public:
 
 private:
 	void ReplaceColor(SDL_Surface *sfc, uint32_t oldcolor, uint32_t newcolor);
+	bool fBorrowed;
 };
 
 
@@ -56,5 +60,8 @@ void font_close(void);
 
 int GetFontWidth(const char *text, int spacing=0, bool is_shaded=false);
 int GetFontHeight();
+
+/* Pixel budget for one dialogue line (matches classic MAXLINELEN * 6 spacing). */
+int GetFontMaxLineWidth(bool has_face);
 
 #endif

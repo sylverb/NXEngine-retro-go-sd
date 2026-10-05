@@ -42,10 +42,6 @@ static int s_clut_ready;
 #define SDL_GW_BOTTOMUP         0x10000000u  /* BMP storage order — blit/scale flips Y */
 #define SDL_GW_STATIC_PALETTE   0x20000000u  /* format->palette is not heap */
 
-/* Shared scratch palette for XIP sheets — only needed during Load+palette_add. */
-static SDL_Color s_xip_pal_colors[256];
-static SDL_Palette s_xip_palette = { 256, s_xip_pal_colors };
-
 /* Pad → SDL key queue (edge detect). VOLUME/PAUSE is Retro-Go only. */
 static uint32_t s_pad_prev;
 static SDL_Event s_evt_q[16];
@@ -133,9 +129,54 @@ static uint8_t gw_nearest_clut_index(uint8_t r, uint8_t g, uint8_t b)
     return (uint8_t)best;
 }
 
+static void gw_blit_surface_to_fb(SDL_Surface *screen, void *fb)
+{
+    if (!screen || !screen->pixels || !fb)
+        return;
+
+    int w = screen->w < GW_LCD_WIDTH ? screen->w : GW_LCD_WIDTH;
+    int h = screen->h < GW_LCD_HEIGHT ? screen->h : GW_LCD_HEIGHT;
+    int bpp = screen->format->BytesPerPixel;
+    int lut8 = gw_lcd_is_lut8();
+
+    if (lut8 && bpp == 1) {
+        if (w == GW_LCD_WIDTH && screen->pitch == GW_LCD_WIDTH) {
+            memcpy(fb, screen->pixels, (size_t)w * (size_t)h);
+        } else {
+            for (int y = 0; y < h; y++) {
+                memcpy((uint8_t *)fb + y * GW_LCD_WIDTH,
+                       (uint8_t *)screen->pixels + y * screen->pitch,
+                       (size_t)w);
+            }
+        }
+    } else if (!lut8 && bpp == 2) {
+        uint16_t *dst = (uint16_t *)fb;
+        for (int y = 0; y < h; y++) {
+            memcpy(dst + y * GW_LCD_WIDTH,
+                   (uint8_t *)screen->pixels + y * screen->pitch,
+                   (size_t)w * 2);
+        }
+    } else if (!lut8 && bpp == 1 && screen->format->palette) {
+        SDL_Color *pal = screen->format->palette->colors;
+        uint16_t *dstfb = (uint16_t *)fb;
+        for (int y = 0; y < h; y++) {
+            uint8_t *src = (uint8_t *)screen->pixels + y * screen->pitch;
+            uint16_t *dst = dstfb + y * GW_LCD_WIDTH;
+            for (int x = 0; x < w; x++) {
+                SDL_Color c = pal[src[x]];
+                dst[x] = (uint16_t)SDL_MapRGB(&s_fmt16, c.r, c.g, c.b);
+            }
+        }
+    }
+}
+
 static void gw_menu_repaint(void)
 {
-    /* Firmware pause menu draws itself; game pixels already in the FB. */
+    /*
+     * Firmware does lcd_clear_active_buffer() then this callback before
+     * darkening + drawing the pause chrome. Empty repaint ⇒ black menu.
+     */
+    gw_blit_surface_to_fb(s_screen, lcd_get_active_buffer());
 }
 
 static void poll_pad_to_keys_from(const odroid_gamepad_state_t *j)
@@ -375,7 +416,10 @@ SDL_Surface *SDL_CreateRGBSurface(Uint32 flags, int width, int height, int depth
 {
     (void)flags;
     (void)Amask;
-    /* Session surfaces: RAM/bonus/DTCM first — never depend on tiny AHB alone. */
+    /*
+     * Session-lifetime surfaces (font glyphs): bump pools. Never Free'd for
+     * real. Stage XIP sheets use CreateRGBSurfaceFrom (AHB headers).
+     */
     SDL_Surface *s = (SDL_Surface *)gw_calloc(1, sizeof(SDL_Surface));
     if (!s)
         return NULL;
@@ -424,10 +468,14 @@ SDL_Surface *SDL_CreateRGBSurfaceFrom(void *pixels, int width, int height, int d
                                       int pitch, Uint32 Rmask, Uint32 Gmask, Uint32 Bmask, Uint32 Amask)
 {
     (void)Amask;
-    SDL_Surface *s = (SDL_Surface *)gw_calloc(1, sizeof(SDL_Surface));
+    /*
+     * XIP sheet wrappers — AHB so Sprites::FlushSheets / delete actually
+     * reclaim (~sizeof Surface+Format each). Pixels stay in flash.
+     */
+    SDL_Surface *s = (SDL_Surface *)gw_calloc_ahb(1, sizeof(SDL_Surface));
     if (!s)
         return NULL;
-    s->format = (SDL_PixelFormat *)gw_calloc(1, sizeof(SDL_PixelFormat));
+    s->format = (SDL_PixelFormat *)gw_calloc_ahb(1, sizeof(SDL_PixelFormat));
     if (!s->format) {
         gw_free_ahb(s);
         return NULL;
@@ -577,11 +625,23 @@ static void blit8_remap_rows(const uint8_t *src, int spitch,
     for (int y = 0; y < h; y++) {
         const uint8_t *s = src;
         uint8_t *d = dst;
-        for (int x = 0; x < w; x++) {
-            uint8_t p = remap[s[x]];
-            if (use_key && p == key)
-                continue;
-            d[x] = p;
+        if (!use_key) {
+            for (int x = 0; x < w; x++)
+                d[x] = remap[s[x]];
+        } else {
+            /* Skip transparent runs (typical sprite sheets). */
+            int x = 0;
+            while (x < w) {
+                while (x < w && remap[s[x]] == key)
+                    x++;
+                while (x < w) {
+                    uint8_t p = remap[s[x]];
+                    if (p == key)
+                        break;
+                    d[x] = p;
+                    x++;
+                }
+            }
         }
         src += spitch;
         dst += dpitch;
@@ -879,42 +939,7 @@ int SDL_Flip(SDL_Surface *screen)
     /* Skip present if LTDC still applying previous swap (no VBlank sleep —
      * audio sync below already paces the frame). */
     if (draw_frame && !lcd_is_swap_pending()) {
-        void *fb = lcd_get_active_buffer();
-        int w = screen->w < GW_LCD_WIDTH ? screen->w : GW_LCD_WIDTH;
-        int h = screen->h < GW_LCD_HEIGHT ? screen->h : GW_LCD_HEIGHT;
-        int bpp = screen->format->BytesPerPixel;
-        int lut8 = gw_lcd_is_lut8();
-
-        if (lut8 && bpp == 1) {
-            if (w == GW_LCD_WIDTH && screen->pitch == GW_LCD_WIDTH) {
-                memcpy(fb, screen->pixels, (size_t)w * (size_t)h);
-            } else {
-                for (int y = 0; y < h; y++) {
-                    memcpy((uint8_t *)fb + y * GW_LCD_WIDTH,
-                           (uint8_t *)screen->pixels + y * screen->pitch,
-                           (size_t)w);
-                }
-            }
-        } else if (!lut8 && bpp == 2) {
-            uint16_t *dst = (uint16_t *)fb;
-            for (int y = 0; y < h; y++) {
-                memcpy(dst + y * GW_LCD_WIDTH,
-                       (uint8_t *)screen->pixels + y * screen->pitch,
-                       (size_t)w * 2);
-            }
-        } else if (!lut8 && bpp == 1 && screen->format->palette) {
-            SDL_Color *pal = screen->format->palette->colors;
-            uint16_t *dstfb = (uint16_t *)fb;
-            for (int y = 0; y < h; y++) {
-                uint8_t *src = (uint8_t *)screen->pixels + y * screen->pitch;
-                uint16_t *dst = dstfb + y * GW_LCD_WIDTH;
-                for (int x = 0; x < w; x++) {
-                    SDL_Color c = pal[src[x]];
-                    dst[x] = (uint16_t)SDL_MapRGB(&s_fmt16, c.r, c.g, c.b);
-                }
-            }
-        }
-
+        gw_blit_surface_to_fb(screen, lcd_get_active_buffer());
         common_ingame_overlay();
         lcd_swap();
     }
@@ -1126,6 +1151,15 @@ static const uint8_t *gw_pack_image(const char *file, uint32_t *size_out, char *
     return NULL;
 }
 
+/*
+ * Shared scratch for LoadBMP → palette_add (synchronous). After palette_add
+ * only gw_index_remap is needed for blit — do not keep 1 KiB/sheet on bump.
+ * Safe because FlushSheets deletes sheets; next Load overwrites scratch before
+ * its own palette_add.
+ */
+static SDL_Palette s_xip_scratch_pal;
+static SDL_Color s_xip_scratch_colors[256];
+
 static SDL_Surface *gw_surface_xip_8(const uint8_t *pixels, int width, int height, int pitch,
                                      int bottomup, const uint8_t *pal_bgra, int ncolors)
 {
@@ -1136,19 +1170,18 @@ static SDL_Surface *gw_surface_xip_8(const uint8_t *pixels, int width, int heigh
     if (bottomup)
         s->flags |= SDL_GW_BOTTOMUP;
 
-    /* One shared palette buffer — palette_add runs before the next LoadBMP. */
-    memset(s_xip_pal_colors, 0, sizeof(s_xip_pal_colors));
-    s_xip_palette.ncolors = 256;
-    s_xip_palette.colors = s_xip_pal_colors;
-    s->format->palette = &s_xip_palette;
+    memset(s_xip_scratch_colors, 0, sizeof(s_xip_scratch_colors));
     if (pal_bgra) {
         int n = ncolors > 256 ? 256 : ncolors;
         for (int i = 0; i < n; i++) {
-            s_xip_pal_colors[i].b = pal_bgra[i * 4 + 0];
-            s_xip_pal_colors[i].g = pal_bgra[i * 4 + 1];
-            s_xip_pal_colors[i].r = pal_bgra[i * 4 + 2];
+            s_xip_scratch_colors[i].b = pal_bgra[i * 4 + 0];
+            s_xip_scratch_colors[i].g = pal_bgra[i * 4 + 1];
+            s_xip_scratch_colors[i].r = pal_bgra[i * 4 + 2];
         }
     }
+    s_xip_scratch_pal.ncolors = 256;
+    s_xip_scratch_pal.colors = s_xip_scratch_colors;
+    s->format->palette = &s_xip_scratch_pal;
     return s;
 }
 

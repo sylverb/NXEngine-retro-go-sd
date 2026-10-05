@@ -91,6 +91,7 @@ third_party/nxengine/endgame/island.cpp \
 third_party/nxengine/endgame/misc_end.cpp \
 third_party/nxengine/floattext.cpp \
 third_party/nxengine/game.cpp \
+third_party/nxengine/graphics/cjkfont.cpp \
 third_party/nxengine/graphics/font.cpp \
 third_party/nxengine/graphics/graphics.cpp \
 third_party/nxengine/graphics/nxsurface.cpp \

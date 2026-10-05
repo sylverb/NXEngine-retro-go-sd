@@ -28,6 +28,14 @@ class DBuffer
 public:
 	DBuffer();
 	~DBuffer();
+#ifdef NXENGINE_GW
+	/*
+	 * Default: bump (Head/ArmsItem/StageSelect — session lifetime).
+	 * SP_MAP compile sets dbuf_ahb_mode so TRA Clear can free.
+	 */
+	void *operator new(size_t n);
+	void operator delete(void *p);
+#endif
 	
 	void SetTo(const uint8_t *data, int length);
 	void SetTo(const char *string);
@@ -70,7 +78,15 @@ private:
 };
 
 #ifdef NXENGINE_GW
-static inline uint8_t *dbuf_alloc(size_t n) { return (uint8_t *)gw_alloc(n); }
+/* Non-zero while compiling SP_MAP scripts (reclaimed every TRA). */
+extern int dbuf_ahb_mode;
+
+static inline uint8_t *dbuf_alloc(size_t n)
+{
+	if (dbuf_ahb_mode)
+		return (uint8_t *)gw_alloc_ahb(n);
+	return (uint8_t *)gw_alloc(n);
+}
 static inline void dbuf_free(uint8_t *p) { gw_free_ahb(p); }
 static inline uint8_t *dbuf_grow(uint8_t *old, int old_size, int new_size)
 {

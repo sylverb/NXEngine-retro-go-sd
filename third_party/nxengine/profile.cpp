@@ -126,6 +126,73 @@ FILE *fp;
 	return 0;
 }
 
+/* Same as profile_load but skips flags[] / teleslots — for save-select UI. */
+bool profile_load_preview(const char *pfname, ProfilePreview *file)
+{
+int i, curweaponslot;
+FILE *fp;
+
+	memset(file, 0, sizeof(*file));
+
+	fp = fileopen(pfname, "rb");
+	if (!fp)
+		return 1;
+
+	if (!fverifystring(fp, "Do041220"))
+	{
+		staterr("profile_load_preview: invalid savegame format: '%s'", pfname);
+		fclose(fp);
+		return 1;
+	}
+
+	file->stage = fgetl(fp);
+	(void)fgetl(fp);				/* songno */
+	(void)fgetl(fp);				/* px */
+	(void)fgetl(fp);				/* py */
+	(void)fgetl(fp);				/* pdir */
+
+	file->maxhp = fgeti(fp);
+	(void)fgeti(fp);				/* whimstars */
+	file->hp = fgeti(fp);
+
+	fgeti(fp);						/* unknown */
+	curweaponslot = fgetl(fp);
+	fgetl(fp);						/* unknown */
+	file->equipmask = fgetl(fp);
+
+	fseek(fp, PF_WEAPONS_OFFS, SEEK_SET);
+	for(i=0;i<MAX_WPN_SLOTS;i++)
+	{
+		int type = fgetl(fp);
+		if (!type) break;
+		if (type < 0 || type >= WPN_COUNT) break;
+
+		int level = fgetl(fp);
+		int xp = fgetl(fp);
+		(void)fgetl(fp);			/* maxammo */
+		(void)fgetl(fp);			/* ammo */
+
+		file->weapons[type].hasWeapon = true;
+		file->weapons[type].level = (level - 1);
+		file->weapons[type].xp = xp;
+
+		if (i == curweaponslot)
+			file->curWeapon = type;
+	}
+
+	file->ninventory = 0;
+	fseek(fp, PF_INVENTORY_OFFS, SEEK_SET);
+	for(i=0;i<MAX_INVENTORY;i++)
+	{
+		int item = fgetl(fp);
+		if (!item) break;
+		file->inventory[file->ninventory++] = item;
+	}
+
+	fclose(fp);
+	return 0;
+}
+
 
 bool profile_save(const char *pfname, Profile *file)
 {

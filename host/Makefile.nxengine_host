@@ -96,6 +96,7 @@ HOST_NX_SRCS := \
 	$(NX_ROOT)/extract/extractfiles.cpp \
 	$(NX_ROOT)/extract/extractpxt.cpp \
 	$(NX_ROOT)/extract/extractstages.cpp \
+	$(NX_ROOT)/graphics/cjkfont.cpp \
 	$(NX_ROOT)/graphics/font.cpp \
 	$(NX_ROOT)/graphics/graphics.cpp \
 	$(NX_ROOT)/graphics/nxsurface.cpp \

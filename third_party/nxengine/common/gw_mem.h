@@ -1,8 +1,13 @@
 /*
  * G&W memory helpers for NXEngine.
  *
- * Only AHB (newlib heap) supports realloc/free. RAM_EMU / DTCM / ITCM /
- * LUT8 bonus are bump pools — grow via alloc+copy, never realloc.
+ * Two worlds:
+ *   gw_alloc / gw_calloc     — bump pools (RAM_EMU → bonus → DTCM). No free.
+ *                              Session data + Object/Caret freelist backing.
+ *   gw_alloc_ahb / gw_free   — AHB newlib heap. Real malloc/free.
+ *                              Spritesheet / tileset / backdrop wrappers only.
+ *
+ * Never put gameplay Objects on AHB (~90 KiB); never expect bump to reclaim.
  */
 #ifndef NXENGINE_GW_MEM_H
 #define NXENGINE_GW_MEM_H
@@ -14,20 +19,20 @@
 extern "C" {
 #endif
 
-/* Call after lcd_setup_framebuffers(LCD_MODE_LUT8). */
 void gw_mem_init(void);
+void gw_mem_log(const char *tag);
 
 int gw_is_ahb(const void *p);
 void gw_free_ahb(void *p);
 
-/* Prefer RAM_EMU → LUT8 bonus → DTCM → AHB. */
+/* Bump only — never touches AHB. */
 void *gw_alloc(size_t n);
 void *gw_calloc(size_t count, size_t size);
 
-/*
- * Grow a block. realloc ONLY when old is AHB. On failure returns NULL and
- * leaves the old pointer untouched.
- */
+/* AHB newlib only — freeable. */
+void *gw_alloc_ahb(size_t n);
+void *gw_calloc_ahb(size_t count, size_t size);
+
 void *gw_grow(void *old, size_t old_bytes, size_t new_bytes);
 
 #ifdef __cplusplus

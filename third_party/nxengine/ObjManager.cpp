@@ -10,6 +10,48 @@ static Player ZERO_PLAYER;
 Object *firstobject = NULL, *lastobject = NULL;
 Object *lowestobject = NULL, *highestobject = NULL;
 
+#ifdef NXENGINE_GW
+/*
+ * operator delete cannot reclaim RAM_EMU/DTCM bump allocations. Every
+ * bullet/smoke/enemy would permanently eat ~224B until HEAP OOM. Recycle
+ * via freelist instead; Player is a single static instance.
+ */
+static Object *s_obj_free;
+static Player s_player_storage;
+static bool s_player_live;
+
+Object *gw_obj_alloc(void)
+{
+	Object *o = s_obj_free;
+	if (o) {
+		s_obj_free = o->next;
+		return o;
+	}
+	return new Object;
+}
+
+void gw_obj_free(Object *o)
+{
+	if (!o) return;
+	o->next = s_obj_free;
+	s_obj_free = o;
+}
+
+static Player *gw_player_alloc(void)
+{
+	if (s_player_live)
+		return NULL;
+	s_player_live = true;
+	return &s_player_storage;
+}
+
+void gw_player_free(Player *p)
+{
+	(void)p;
+	s_player_live = false;
+}
+#endif
+
 /*
 void c------------------------------() {}
 */
@@ -22,14 +64,22 @@ Object *o;
 	// create the structure
 	if (type != OBJ_PLAYER)
 	{
+#ifdef NXENGINE_GW
+		o = gw_obj_alloc();
+#else
 		o = new Object;
+#endif
 		if (!o)
 			return NULL;
 		*o = ZERO_OBJECT;	// safely clears all members
 	}
 	else
 	{
+#ifdef NXENGINE_GW
+		Player *p = gw_player_alloc();
+#else
 		Player *p = new Player;
+#endif
 		if (!p)
 			return NULL;
 		*p = ZERO_PLAYER;
@@ -40,6 +90,17 @@ Object *o;
 	o->SetType(type);
 	o->flags = objprop[type].defaultflags;
 	o->DamageText = new FloatText(SPR_REDNUMBERS);
+	if (!o->DamageText) {
+#ifdef NXENGINE_GW
+		if (type == OBJ_PLAYER)
+			gw_player_free((Player *)o);
+		else
+			gw_obj_free(o);
+#else
+		delete o;
+#endif
+		return NULL;
+	}
 	
 	o->x = x - (sprites[o->sprite].spawn_point.x << CSF);
 	o->y = y - (sprites[o->sprite].spawn_point.y << CSF);

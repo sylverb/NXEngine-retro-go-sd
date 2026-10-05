@@ -20,6 +20,10 @@ extern int flipacceltime;
 bool Replay::begin_record(const char *fname)
 {
 FILE *fp;
+#ifdef NXENGINE_GW
+	(void)fname;
+	return 1;
+#else
 Profile profile;
 
 	end_record();
@@ -59,6 +63,7 @@ Profile profile;
 	rec.fb.SetBufferSize(256);
 	rec.fb.Dump();
 	return 0;
+#endif
 }
 
 bool Replay::end_record()
@@ -92,6 +97,10 @@ void c------------------------------() {}
 // load the save-game contained with the given replay and begin playback.
 bool Replay::begin_playback(const char *fname)
 {
+#ifdef NXENGINE_GW
+	(void)fname;
+	return 1;
+#else
 FILE *fp;
 Profile profile;
 
@@ -147,6 +156,7 @@ Profile profile;
 	play.fp = fp;
 //	dump_replay();
 	return 0;
+#endif
 }
 
 bool Replay::end_playback()
@@ -375,13 +385,25 @@ void Replay::OnGameStarting()
 {
 	stat("Replay::OnGameStarting()");
 	
+#ifdef NXENGINE_GW
+	/*
+	 * Auto-replay is useless on device: no replay/ dir on SD, and
+	 * begin_record() put a full Profile (~8.5 KiB flags[]) on the ~24 KiB
+	 * stack — enough to corrupt physics after a load/death restart.
+	 */
+	return;
+#else
 	if (!IsPlaying())
 		begin_record_next();
+#endif
 }
 
 
 bool Replay::begin_record_next()
 {
+#ifdef NXENGINE_GW
+	return 1;
+#else
 	int slot = GetAvailableSlot();
 	if (slot == -1)
 	{
@@ -391,6 +413,7 @@ bool Replay::begin_record_next()
 	
 	stat("begin_record_next: starting record to slot %d", slot);
 	return begin_record(GetReplayName(slot));
+#endif
 }
 
 

@@ -72,18 +72,19 @@ private:
 	uint8_t fFace;			// current NPC face or 0 if none
 	int fFaceXOffset;		// for face slide-in animation
 	
-	// currently visible lines
-	char fLines[MSG_NLINES][80];
+	// currently visible lines (UTF-8; room for ~40 CJK chars / line)
+	char fLines[MSG_NLINES][160];
 	int fCurLine;
-	int fCurLineLen;
+	int fCurLineLen;	/* byte length of fLines[fCurLine] */
 	
 	// handles scrolling lines off
 	bool fScrolling;
 	int fTextYOffset;
 	
-	// chars waiting to be added
-	char fCharsWaiting[256];
-	uint8_t fCWHead, fCWTail;
+	// chars waiting to be added (byte ring; UTF-8 sequences stay contiguous)
+	enum { CW_SIZE = 512, CW_MASK = CW_SIZE - 1 };
+	char fCharsWaiting[CW_SIZE];
+	uint16_t fCWHead, fCWTail;
 	
 	int fTextTimer;
 	bool fCanSpeedUp;

@@ -4,7 +4,7 @@
 /* located in game.cpp */
 
 //--------------[referenced from TextBox/SaveSelect.cpp]-------------//
-bool game_save(Profile *p);
+bool game_save(int num);
 
 
 /* located in map.cpp */
@@ -16,13 +16,13 @@ const char *map_get_stage_name(int mapno);
 /* located in TextBox/SaveSelect.cpp */
 
 //--------------[referenced from TextBox/SaveSelect.cpp]-------------//
-static void DrawHealth(int xright, int y, Profile *p);
+static void DrawHealth(int xright, int y, ProfilePreview *p);
 
 
 /* located in profile.cpp */
 
 //--------------[referenced from TextBox/SaveSelect.cpp]-------------//
-bool profile_load(const char *pfname, Profile *file);
+bool profile_load_preview(const char *pfname, ProfilePreview *file);
 const char *GetProfileName(int num);
 
 

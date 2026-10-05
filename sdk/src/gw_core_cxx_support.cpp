@@ -93,7 +93,11 @@ extern "C" void *heap_alloc_mem(size_t s)
         }
     }
 #ifdef NXENGINE_GW
-    /* Include LUT8 bonus (~150 KiB) — default path skipped it and filled AHB. */
+    /*
+     * Global operator new → bump only (gw_alloc). AHB is reserved for
+     * explicit gw_alloc_ahb (spritesheet wrappers freed on FlushSheets).
+     * Object/Caret/FloatText recycle via freelists so bump stays bounded.
+     */
     if (!ptr)
         ptr = gw_alloc(s);
 #else

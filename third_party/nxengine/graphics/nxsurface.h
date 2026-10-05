@@ -62,6 +62,12 @@ public:
 	NXSurface(int wd, int ht, NXFormat *format = screen->Format());
 	NXSurface(SDL_Surface *from_sfc, bool freesurface=true);
 	~NXSurface();
+
+#ifdef NXENGINE_GW
+	/* Sheets/tilesets/backdrops are deleted on TRA — live on AHB. */
+	void *operator new(size_t n);
+	void operator delete(void *p);
+#endif
 	
 	bool AllocNew(int wd, int ht, NXFormat *format = screen->Format());
 	bool LoadImage(const char *pbm_name, bool use_colorkey=false, int use_display_format=-1);
@@ -145,4 +151,3 @@ NXSurface::DrawPixel(int x, int y, NXColor color)
 
 
 #endif
-

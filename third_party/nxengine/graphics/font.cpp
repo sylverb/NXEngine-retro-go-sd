@@ -9,8 +9,16 @@
 #include "../nx.h"
 #include "font.h"
 #include "font.fdh"
+#include "cjkfont.h"
 
 static int text_draw(int x, int y, const char *text, int spacing=0, NXFont *font=&whitefont);
+
+static uint32_t font_rgb(NXFont *font)
+{
+	if (font == &greenfont) return 0x00ff80;
+	if (font == &bluefont) return 0xa0b5de;
+	return 0xffffff; /* white + shadow top */
+}
 
 #define SHADOW_OFFSET		2		// distance of drop shadows
 
@@ -97,9 +105,22 @@ bool error = false;
 		uint32_t fgindex = SDL_MapRGB(sheet->format, 255, 255, 255);
 
 		error |= whitefont.InitBitmapChars(sheet, fgindex, 0xffffff);
+#ifdef NXENGINE_GW
+		/*
+		 * Green/blue used to each clone the full glyph set (~2×145 surfaces).
+		 * With the extended Latin smalfont that tipped RAM_EMU into AHB and
+		 * OOMed LoadImage / SaveSelect. Tint is a nice-to-have on pause UI.
+		 */
+		greenfont.BorrowLetters(whitefont);
+		bluefont.BorrowLetters(whitefont);
+#else
 		error |= greenfont.InitBitmapChars(sheet, fgindex, 0x00ff80);
 		error |= bluefont.InitBitmapChars(sheet, fgindex, 0xa0b5de);
+#endif
 		error |= shadowfont.InitBitmapCharsShadowed(sheet, fgindex, 0xffffff, 0x000000);
+
+		/* Optional used-glyph CJK atlas (ja/ko packs). Missing is fine for Latin. */
+		(void)cjkfont_init();
 	}
     #ifdef CONFIG_ENABLE_TTF
 	else
@@ -133,13 +154,18 @@ bool error = false;
 	if (error) return 1;
 
 	fontheight = (whitefont.letters['M']->h / SCALE);
+	if (cjkfont_loaded()) {
+		int cjk_h = cjkfont_cell_height();
+		if (cjk_h > fontheight)
+			fontheight = cjk_h;
+	}
 	initilized = true;
 	return 0;
 }
 
 void font_close(void)
 {
-
+	cjkfont_close();
 }
 
 bool font_reload()
@@ -161,6 +187,7 @@ void c------------------------------() {}
 NXFont::NXFont()
 {
 	memset(letters, 0, sizeof(letters));
+	fBorrowed = false;
 }
 
 NXFont::~NXFont()
@@ -168,8 +195,20 @@ NXFont::~NXFont()
 	free();
 }
 
+void NXFont::BorrowLetters(const NXFont &other)
+{
+	free();
+	memcpy(letters, other.letters, sizeof(letters));
+	fBorrowed = true;
+}
+
 void NXFont::free()
 {
+	if (fBorrowed) {
+		memset(letters, 0, sizeof(letters));
+		fBorrowed = false;
+		return;
+	}
 	for(int i=0;i<NUM_FONT_LETTERS;i++)
 	{
 		if (letters[i]) SDL_FreeSurface(letters[i]);
@@ -356,6 +395,7 @@ SDL_Surface *letter;
 int x, y, i;
 
 	// NULL out letters we don't have a character for
+	fBorrowed = false;
 	memset(this->letters, 0, sizeof(this->letters));
 
 #ifndef NXENGINE_GW
@@ -442,8 +482,92 @@ bool NXFont::InitBitmapCharsShadowed(SDL_Surface *sheet, uint32_t fgcolor, \
 									uint32_t color, uint32_t shadowcolor)
 {
 SDL_PixelFormat *format = sdl_screen->format;
+SDL_Rect srcrect, dstrect;
+int x, y, i;
+
+	fBorrowed = false;
+	memset(this->letters, 0, sizeof(this->letters));
+
+#ifdef NXENGINE_GW
+	/*
+	 * Do NOT build via temporary NXFonts. RAM_EMU/DTCM/bonus are bump
+	 * allocators — SDL_FreeSurface cannot reclaim them, so the old
+	 * fgfont+shadowfont temps permanently ate ~2×glyph RAM and OOM'd
+	 * the session after smalfont grew for CP1252 locales.
+	 */
+	uint8_t fg_idx = (uint8_t)SDL_GW_AllocColor(
+		(Uint8)((color >> 16) & 0xff),
+		(Uint8)((color >> 8) & 0xff),
+		(Uint8)(color & 0xff));
+	uint8_t sh_idx = (uint8_t)SDL_GW_AllocColor(
+		(Uint8)((shadowcolor >> 16) & 0xff),
+		(Uint8)((shadowcolor >> 8) & 0xff),
+		(Uint8)(shadowcolor & 0xff));
+	uint8_t src_idx = (uint8_t)fgcolor;
+	uint32_t transp = 0;
+
+	x = 0;
+	y = 0;
+	for (i = 0; bitmap_map[i]; i++)
+	{
+		uint8_t ch = (uint8_t)bitmap_map[i];
+		SDL_Surface *letter = SDL_CreateRGBSurface(
+			SDL_SRCCOLORKEY,
+			BITMAP_CHAR_WIDTH + 1, BITMAP_CHAR_HEIGHT + 1 + SHADOW_OFFSET,
+			format->BitsPerPixel,
+			format->Rmask, format->Gmask, format->Bmask, format->Amask);
+		if (!letter)
+		{
+			staterr("InitBitmapCharsShadowed: OOM glyph %d", ch);
+			return 1;
+		}
+		SDL_FillRect(letter, NULL, transp);
+		SDL_SetColorKey(letter, SDL_SRCCOLORKEY, transp);
+
+		srcrect.x = x;
+		srcrect.y = y;
+		srcrect.w = BITMAP_CHAR_WIDTH;
+		srcrect.h = BITMAP_CHAR_HEIGHT;
+
+		/* Shadow layer */
+		dstrect.x = 0;
+		dstrect.y = SHADOW_OFFSET;
+		SDL_BlitSurface(sheet, &srcrect, letter, &dstrect);
+		if (letter->format->BytesPerPixel == 1) {
+			uint8_t *px = (uint8_t *)letter->pixels;
+			int np = letter->pitch * letter->h;
+			for (int p = 0; p < np; p++) {
+				if (px[p] == src_idx)
+					px[p] = sh_idx;
+			}
+		}
+
+		/* Foreground layer (overwrites overlapping shadow pixels) */
+		dstrect.x = 0;
+		dstrect.y = 0;
+		SDL_BlitSurface(sheet, &srcrect, letter, &dstrect);
+		if (letter->format->BytesPerPixel == 1) {
+			uint8_t *px = (uint8_t *)letter->pixels;
+			/* Only remap the top glyph band so shadow rows stay sh_idx. */
+			int band = (BITMAP_CHAR_HEIGHT + 1) * letter->pitch;
+			for (int p = 0; p < band; p++) {
+				if (px[p] == src_idx)
+					px[p] = fg_idx;
+			}
+		}
+
+		letters[ch] = letter;
+
+		x += BITMAP_SPAC_WIDTH;
+		if (x >= sheet->w)
+		{
+			x = 0;
+			y += BITMAP_SPAC_HEIGHT;
+		}
+	}
+	return 0;
+#else
 NXFont fgfont, shadowfont;
-SDL_Rect dstrect;
 
 	// create temporary fonts in the fg and shadow color
 	if (fgfont.InitBitmapChars(sheet, fgcolor, color))
@@ -454,7 +578,7 @@ SDL_Rect dstrect;
 
 	// now combine the two fonts
 	uint32_t transp = SDL_MapRGB(format, 0, 0, 0);
-	for(int i=0;i<NUM_FONT_LETTERS;i++)
+	for(i=0;i<NUM_FONT_LETTERS;i++)
 	{
 		if (fgfont.letters[i])
 		{
@@ -478,6 +602,7 @@ SDL_Rect dstrect;
 	}
 
 	return 0;
+#endif
 }
 
 
@@ -542,6 +667,68 @@ static int text_draw(int x, int y, const char *text, int spacing, NXFont *font)
 int orgx = x;
 int i;
 SDL_Rect dstrect;
+uint32_t rgb = font_rgb(font);
+bool use_utf8 = cjkfont_loaded();
+
+	if (use_utf8)
+	{
+		const char *p = text;
+		int gi = 0;
+		while (*p)
+		{
+			const char *before = p;
+			uint32_t cp = utf8_next(&p);
+			if (!cp)
+				break;
+
+			if (cp == '=' && game.mode != GM_CREDITS)
+			{
+				if (rendering)
+				{
+					int yadj = (SCALE==1) ? 1:2;
+					draw_sprite((x/SCALE), (y/SCALE)+yadj, SPR_TEXTBULLET);
+				}
+				x += spacing ? spacing : 6;
+				gi++;
+				continue;
+			}
+
+			/* Prefer smalfont for ASCII (menus/digits); atlas for everything else. */
+			if (cp < 0x80) {
+				uint8_t ch = (uint8_t)cp;
+				SDL_Surface *letter = font->letters[ch];
+				if (rendering && ch != ' ' && letter)
+				{
+					dstrect.x = x;
+					dstrect.y = y;
+					SDL_BlitSurface(letter, NULL, sdl_screen, &dstrect);
+				}
+				if (spacing != 0)
+					x += spacing;
+				else if (ch == ' ' && shrink_spaces)
+				{
+					x += (SCALE == 1) ? 5 : 10;
+					if (gi & 1) x++;
+				}
+				else if (letter)
+					x += letter->w;
+				else
+					x += 5;
+			} else {
+				/* CJK cells are taller than smalfont (9px); nudge up so the
+				 * optical center matches Latin digits/punctuation on the line. */
+				int y_cjk = y;
+				int cjk_h = cjkfont_cell_height();
+				if (cjk_h > 9)
+					y_cjk = y - ((cjk_h - 9) / 2) * (SCALE > 0 ? SCALE : 1);
+				int adv = cjkfont_draw_glyph(x, y_cjk, cp, rgb, rendering);
+				x += spacing ? spacing : adv;
+			}
+			(void)before;
+			gi++;
+		}
+		return (x - orgx);
+	}
 
 	for(i=0;text[i];i++)
 	{
@@ -593,8 +780,8 @@ int GetFontWidth(const char *text, int spacing, bool is_shaded)
 {
 int wd;
 
-	if (spacing)
-		return (strlen(text) * spacing);
+	if (spacing && !cjkfont_loaded())
+		return ((int)strlen(text) * spacing);
 
 	rendering = false;
 	shrink_spaces = !is_shaded;
@@ -610,6 +797,12 @@ int wd;
 int GetFontHeight()
 {
 	return fontheight;
+}
+
+int GetFontMaxLineWidth(bool has_face)
+{
+	/* Classic engine: 26/35 glyphs at 6px fixed spacing. */
+	return has_face ? (26 * 6) : (35 * 6);
 }
 
 /*

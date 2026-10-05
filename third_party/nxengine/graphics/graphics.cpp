@@ -163,7 +163,12 @@ bool Graphics::FlushAll()
 	Sprites::FlushSheets();
 	Tileset::Reload();
 	map_flush_graphics();
+#ifdef NXENGINE_GW
+	/* Font glyphs live on bump — never reload (would leak). */
+	return 0;
+#else
 	return font_reload();
+#endif
 }
 
 void Graphics::SetFullscreen(bool enable)

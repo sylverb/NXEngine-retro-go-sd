@@ -37,4 +37,26 @@ struct Profile
 	int num_teleslots;
 };
 
+/*
+ * Save-select UI only. Omits flags[NUM_GAMEFLAGS] (~8 KiB) and teleporter
+ * slots so 5 previews fit in a few KiB of BSS instead of a 43 KiB heap alloc.
+ */
+struct ProfilePreview
+{
+	int stage;
+	int hp, maxhp;
+	uint32_t equipmask;
+	int curWeapon;
+	struct
+	{
+		bool hasWeapon;
+		int level;
+		int xp;
+	} weapons[WPN_COUNT];
+	int inventory[MAX_INVENTORY];
+	int ninventory;
+};
+
+bool profile_load_preview(const char *pfname, ProfilePreview *file);
+
 #endif

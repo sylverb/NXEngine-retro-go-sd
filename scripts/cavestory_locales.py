@@ -9,7 +9,8 @@ Sources: https://www.cavestory.one/download/cave-story.php
 
 CI packs every locale here (`make ci-assets-all`). Prefer zip/7z overlays;
 `.rar` works when `bsdtar`/`unrar`/`unar` is available (CI installs unrar).
-Skip CJK / Cyrillic / CP1254 packs until the engine has matching fonts.
+CJK (ja/ko): pack-time UTF-8 + used-glyph cjkfont.dat atlas (Noto CJK).
+Cyrillic / CP1254 still skipped (no font path yet).
 """
 from __future__ import annotations
 
@@ -26,9 +27,19 @@ class Locale:
     url: str
     nxpk: str
     # "full" = archive contains Doukutsu.exe (+ data/).
-    # "overlay" = translated data/ only; needs English base for Doukutsu.exe.
+    # "overlay" = translated data/ only; needs a full base for Doukutsu.exe.
     kind: str
     notes: str = ""
+    # Script encoding of on-disk .tsc before pack-time UTF-8 conversion.
+    # Latin fans are CP1252 (opaque 8-bit; left as-is). ja=cp932, ko=cp949.
+    text_encoding: str = "cp1252"
+    # For overlays: which full locale supplies Doukutsu.exe / audio extract.
+    base_locale: str = "en"
+    # Bake cjkfont.dat and convert TSC → UTF-8 at pack time.
+    cjk: bool = False
+    # Include in `make ci-assets-all` / release matrix. False when the
+    # published archive is a Windows-only patcher (needs a pre-built data/).
+    ci: bool = True
 
 
 LOCALES: dict[str, Locale] = {
@@ -80,6 +91,35 @@ LOCALES: dict[str, Locale] = {
         nxpk="cavestory_it.nxpk",
         kind="overlay",
     ),
+    "ja": Locale(
+        id="ja",
+        name="Japanese (Studio Pixel 1.0.0.6)",
+        url=f"{BASE_URL}/dou_1006.zip",
+        nxpk="cavestory_ja.nxpk",
+        kind="full",
+        text_encoding="cp932",
+        cjk=True,
+        notes="Shift-JIS TSC → UTF-8 + cjkfont.dat (Noto CJK used-glyph atlas).",
+    ),
+    "ko": Locale(
+        id="ko",
+        name="Korean (Anonymous / romhacking 2147)",
+        url=f"{BASE_URL}/cavestory_k.7z",
+        nxpk="cavestory_ko.nxpk",
+        kind="overlay",
+        text_encoding="cp949",
+        base_locale="ja",
+        cjk=True,
+        ci=False,
+        notes=(
+            "Overlay on Japanese base; CP949 → UTF-8 + cjkfont.dat. "
+            "cavestory.one ships a Windows PatchProgram (not a data tree) — "
+            "apply it to JP 1.0.0.6, zip the resulting data/, then "
+            "`make ci-assets LOCALE=ko` with "
+            "`python3 scripts/prepare_cavestory_tree.py --locale ko --archive that.zip`. "
+            "Skipped in ci-assets-all until a plain overlay URL exists."
+        ),
+    ),
     "nl": Locale(
         id="nl",
         name="Dutch (Ian Noah 2017)",
@@ -106,19 +146,27 @@ def get_locale(locale_id: str) -> Locale:
     return LOCALES[key]
 
 
-def locale_ids() -> list[str]:
-    """Stable order for CI: English first, then the rest alphabetically."""
+def locale_ids(*, ci_only: bool = False) -> list[str]:
+    """Stable order: English first, then the rest alphabetically."""
     ids = sorted(LOCALES)
     if "en" in ids:
         ids.remove("en")
         ids.insert(0, "en")
+    if ci_only:
+        ids = [i for i in ids if LOCALES[i].ci]
     return ids
 
 
 def list_locales() -> None:
     for loc_id in locale_ids():
         loc = LOCALES[loc_id]
-        print(f"  {loc.id:6}  {loc.nxpk:22}  {loc.kind:8}  {loc.name}")
+        flags = []
+        if loc.cjk:
+            flags.append("cjk")
+        if not loc.ci:
+            flags.append("no-ci")
+        flag_s = f"  [{', '.join(flags)}]" if flags else ""
+        print(f"  {loc.id:6}  {loc.nxpk:22}  {loc.kind:8}  {loc.name}{flag_s}")
         if loc.notes:
             print(f"          {loc.notes}")
 
@@ -132,9 +180,14 @@ if __name__ == "__main__":
         action="store_true",
         help="print locale ids one per line (CI/Make)",
     )
+    ap.add_argument(
+        "--ci",
+        action="store_true",
+        help="with --ids, only locales included in ci-assets-all",
+    )
     args = ap.parse_args()
     if args.ids:
-        for loc_id in locale_ids():
+        for loc_id in locale_ids(ci_only=args.ci):
             print(loc_id)
     else:
         list_locales()

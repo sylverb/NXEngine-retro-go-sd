@@ -39,7 +39,7 @@ void Tileset::PatchFromSheet(int tileno, NXSurface *sheet, int srcx, int srcy)
 
 	uint8_t *p = tile_patch[tileno];
 	if (!p) {
-		p = (uint8_t *)gw_alloc((size_t)TILE_W * (size_t)TILE_H);
+		p = (uint8_t *)gw_alloc_ahb((size_t)TILE_W * (size_t)TILE_H);
 		if (!p)
 			return;
 		tile_patch[tileno] = p;
@@ -95,6 +95,10 @@ void Tileset::Close()
 	current_tileset = -1;
 }
 
+/*
+ * Drop current tileset so the next Load() re-runs palette_add (required
+ * after palette_reset — index remaps are otherwise stale).
+ */
 void Tileset::Invalidate()
 {
 #ifdef NXENGINE_GW
@@ -116,12 +120,13 @@ char fname[MAXPATHLEN];
 
 	if (new_tileset != current_tileset)
 	{
+#ifdef NXENGINE_GW
+		ClearPatches();
+#endif
 		if (tileset)
 		{
-#ifdef NXENGINE_GW
-			ClearPatches();
-#endif
 			delete tileset;
+			tileset = NULL;
 			current_tileset = -1;
 		}
 		
@@ -182,12 +187,14 @@ void Tileset::Reload()
 {
 	if (current_tileset != -1)
 	{
-		int tileset = current_tileset;
+		int tileset_id = current_tileset;
 		current_tileset = -1;
 #ifdef NXENGINE_GW
 		ClearPatches();
 #endif
-		Load(tileset);
+		delete tileset;
+		tileset = NULL;
+		Load(tileset_id);
 	}
 }
 

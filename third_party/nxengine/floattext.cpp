@@ -5,6 +5,28 @@
 FloatText *FloatText::first = NULL;
 FloatText *FloatText::last = NULL;
 
+#ifdef NXENGINE_GW
+static FloatText *s_ft_free;
+
+void *FloatText::operator new(size_t sz)
+{
+	FloatText *ft = s_ft_free;
+	if (ft) {
+		s_ft_free = ft->next;
+		return ft;
+	}
+	return ::operator new(sz);
+}
+
+void FloatText::operator delete(void *p)
+{
+	if (!p) return;
+	FloatText *ft = (FloatText *)p;
+	ft->next = s_ft_free;
+	s_ft_free = ft;
+}
+#endif
+
 /*
 void c------------------------------() {}
 */

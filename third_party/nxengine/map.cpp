@@ -2,6 +2,10 @@
 #include "nx.h"
 #include "map.h"
 #include "map.fdh"
+#ifdef NXENGINE_GW
+#include "gw_mem.h"
+extern "C" void common_emu_frame_loop_reset(void);
+#endif
 
 stMap map;
 
@@ -37,10 +41,8 @@ char fname[MAXPATHLEN];
 		Sprites::FlushSheets();
 		map_flush_graphics();
 #ifdef NXENGINE_GW
-		/* Same-tileset stages kept stale gw_index_remap after palette_reset.
-		 * Do NOT font_reload here — glyph surfaces are bump-allocated and
-		 * FreeSurface cannot reclaim them (OOM → black title). Fonts use
-		 * stable CLUT slots 240..255 via SDL_GW_AllocColor. */
+		/* Drop destroyable-tile RAM patches (AHB); next Load rebuilds. */
+		Tileset::ClearPatches();
 		Tileset::Invalidate();
 #endif
     }
@@ -57,8 +59,7 @@ char fname[MAXPATHLEN];
 	if (load_map(fname)) return 1;
 	
 	sprintf(fname, "%s/%s.pxa", stage_dir, tileset_names[stages[stage_no].tileset]);
-	if (load_tileattr(fname)) return 1;
-	
+	if (load_tileattr(fname)) return 1;	
 	sprintf(fname, "%s.pxe", stage);
 	if (load_entities(fname)) return 1;
 	
@@ -68,6 +69,20 @@ char fname[MAXPATHLEN];
 	map_set_backdrop(stages[stage_no].bg_no);
 	map.scrolltype = stages[stage_no].scroll_type;
 	map.motionpos = 0;
+
+#ifdef NXENGINE_GW
+	{
+		char tag[40];
+		snprintf(tag, sizeof(tag), "stage%d", stage_no);
+		gw_mem_log(tag);
+	}
+	/*
+	 * TRA can take hundreds of ms without Flip. common_emu_frame_loop then
+	 * accumulates a huge frame_integrator and sticks at skip_frames=2
+	 * (no presents) until pause menu calls frame_loop_reset. Resync here.
+	 */
+	common_emu_frame_loop_reset();
+#endif
 	
 	return 0;
 }
@@ -535,7 +550,6 @@ int i;
 		}
 	}
 }
-
 
 /*
 void c------------------------------() {}

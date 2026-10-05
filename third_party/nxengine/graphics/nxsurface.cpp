@@ -4,8 +4,12 @@
 #include "../settings.h"
 #include "../config.h"
 #include "graphics.h"
+#include "palette.fdh"
 #include "nxsurface.h"
 #include "nxsurface.fdh"
+#ifdef NXENGINE_GW
+#include "gw_mem.h"
+#endif
 
 #ifdef CONFIG_MUTABLE_SCALE
 #ifdef NXENGINE_GW
@@ -15,6 +19,17 @@
 #endif
 #endif
 
+#ifdef NXENGINE_GW
+void *NXSurface::operator new(size_t n)
+{
+	/* AHB only — bump fallback would leak across FlushSheets. */
+	return gw_calloc_ahb(1, n);
+}
+void NXSurface::operator delete(void *p)
+{
+	gw_free_ahb(p);
+}
+#endif
 
 NXSurface::NXSurface()
 {

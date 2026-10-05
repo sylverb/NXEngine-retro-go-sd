@@ -32,9 +32,9 @@ struct ScriptPage
 	{
 		for(int i=0;i<scripts.nitems;i++)
 		{
-			delete scripts.get(i);	// it's safe to delete NULL, so no check here
+			delete scripts.get(i);	// AHB map scripts free; bump pages no-op
 #ifdef NXENGINE_GW
-			/* Bump pools cannot reclaim the pointer table — keep capacity. */
+			/* Bump pointer table cannot be reclaimed — keep capacity. */
 			scripts.put(i, (DBuffer *)0);
 #endif
 		}
@@ -161,6 +161,12 @@ bool result;
 	if (curscript.running && curscript.pageno == pageno)
 		StopScript(&curscript);
 	
+#ifdef NXENGINE_GW
+	/* Only map scripts are reloaded every TRA — put those on AHB.
+	 * Head/ArmsItem/StageSelect stay on bump (session lifetime). */
+	int prev_ahb = dbuf_ahb_mode;
+	dbuf_ahb_mode = (pageno == SP_MAP);
+#endif
 	page->Clear();
 	
 	// load the raw script text
@@ -168,6 +174,9 @@ bool result;
 	if (!buf)
 	{
 		staterr("tsc_load: failed to load file: '%s'", fname);
+#ifdef NXENGINE_GW
+		dbuf_ahb_mode = prev_ahb;
+#endif
 		return 1;
 	}
 
@@ -198,6 +207,7 @@ bool result;
 	//int top_script = CompileScripts(buf, fsize, base);
 	result = tsc_compile(buf, fsize, pageno);
 #ifdef NXENGINE_GW
+	dbuf_ahb_mode = prev_ahb;
 	/* Pack / flash XIP — never free. Only release true heap buffers. */
 	if (!gw_pack_ptr_in_pack(buf))
 		free(buf);

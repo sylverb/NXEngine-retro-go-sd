@@ -88,23 +88,26 @@ int i;
 
 #ifdef NXENGINE_GW
 	/* Sheets stay XIP in flash — attach a 256-byte index remap for blit,
-	 * do not rewrite pixel bytes. */
+	 * do not rewrite pixel bytes. Remap lives on AHB with the sheet wrapper
+	 * and is freed by FlushSheets / SDL_FreeSurface. */
 	{
 		Uint8 *table = sfc->gw_index_remap;
 		if (!table) {
-			table = (Uint8 *)gw_calloc(256, 1);
-			if (!table)
-				table = (Uint8 *)calloc(256, 1);
+			table = (Uint8 *)gw_calloc_ahb(256, 1);
 			sfc->gw_index_remap = table;
 		}
 		if (table) {
 			for (i = 0; i < MAX_COLORS; i++)
 				table[i] = (Uint8)remap[i];
-			if (sfc->flags & SDL_SRCCOLORKEY) {
-				Uint32 ck = sfc->format->colorkey;
-				if (ck < MAX_COLORS)
-					sfc->format->colorkey = table[ck];
-			}
+			/*
+			 * Cave Story .pbm colorkey is always source index 0 (black).
+			 * Do NOT remap format->colorkey through the table repeatedly —
+			 * after the first palette_add it already holds a screen index,
+			 * and table[screen_idx] corrupts transparency (wrong colors +
+			 * more opaque pixels → slower blits).
+			 */
+			if (sfc->flags & SDL_SRCCOLORKEY)
+				sfc->format->colorkey = table[0];
 		}
 	}
 #else

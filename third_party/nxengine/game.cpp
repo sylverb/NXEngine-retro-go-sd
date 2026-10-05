@@ -433,16 +433,26 @@ extern int flipacceltime;
 void c------------------------------() {}
 */
 
+#ifdef NXENGINE_GW
+/* Full Profile is ~8.5 KiB (flags[8000]) — too large for the ~24 KiB stack. */
+static Profile s_profile_io;
+#endif
+
 bool game_load(int num)
 {
-Profile p;
+#ifdef NXENGINE_GW
+Profile *p = &s_profile_io;
+#else
+Profile p_storage;
+Profile *p = &p_storage;
+#endif
 
 	stat("game_load: loading savefile %d", num);
 	
-	if (profile_load(GetProfileName(num), &p))
+	if (profile_load(GetProfileName(num), p))
 		return 1;
 	
-	return game_load(&p);
+	return game_load(p);
 }
 
 bool game_load(Profile *p)
@@ -502,14 +512,19 @@ int i;
 
 bool game_save(int num)
 {
-Profile p;
+#ifdef NXENGINE_GW
+Profile *p = &s_profile_io;
+#else
+Profile p_storage;
+Profile *p = &p_storage;
+#endif
 
 	stat("game_save: writing savefile %d", num);
 	
-	if (game_save(&p))
+	if (game_save(p))
 		return 1;
 	
-	if (profile_save(GetProfileName(num), &p))
+	if (profile_save(GetProfileName(num), p))
 		return 1;
 	
 	return 0;

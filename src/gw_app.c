@@ -22,10 +22,10 @@
 
 #include "platform/gw_nx_config.h"
 #include "platform/gw_pack.h"
+#include "gw_mem.h"
 
 void wdog_refresh(void);
 void HAL_Delay(uint32_t ms);
-void gw_mem_init(void);
 
 #ifdef __cplusplus
 extern "C" {
@@ -103,6 +103,7 @@ void app_main(uint8_t load_state, uint8_t start_paused, int8_t save_slot)
     common_emu_state.pause_after_frames = start_paused ? 2 : 0;
 
     gw_mem_init();
+    gw_mem_log("boot");
     boot_banner("Cave Story", "loading pack...");
 
 #ifndef HOST_BUILD
