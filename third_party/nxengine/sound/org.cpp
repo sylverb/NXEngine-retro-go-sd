@@ -485,10 +485,10 @@ FILE *fp;
 int i, j;
 
 	fp = fileopen(fname, "rb");
-	if (!fp) { visible_warning("org_load: no such file: '%s'", fname); return 1; }
+	if (!fp) { staterr("org_load: no such file: '%s'", fname); return 1; }
 	
 	for(i=0;i<6;i++) { buf[i] = fgetc(fp); } buf[i] = 0;
-	if (strcmp(buf, magic)) { visible_warning("org-load: not an org file (got '%s')", buf); fclose(fp); return 1; }
+	if (strcmp(buf, magic)) { staterr("org-load: not an org file (got '%s')", buf); fclose(fp); return 1; }
 	stat("%s: %s detected", fname, magic);
 	
 	fseek(fp, 0x06, SEEK_SET);
@@ -504,7 +504,7 @@ int i, j;
 	
 	if (song.loop_end < song.loop_start)
 	{
-		visible_warning("org_load: loop end is before loop start");
+		staterr("org_load: loop end is before loop start");
 		fclose(fp);
 		return 1;
 	}
@@ -530,7 +530,7 @@ int i, j;
 		
 		if (song.instrument[i].nnotes >= MAX_SONG_LENGTH)
 		{
-			visible_warning(" * org_load: instrument %d has too many notes! (has %d, max %d)", i, song.instrument[i].nnotes, MAX_SONG_LENGTH);
+			staterr(" * org_load: instrument %d has too many notes! (has %d, max %d)", i, song.instrument[i].nnotes, MAX_SONG_LENGTH);
 			fclose(fp);
 			return 1;
 		}

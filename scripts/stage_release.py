@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
 """Stage Retro-Go SD release assets for the active project kind.
 
-Reads PROJECT_KIND and PACKED_BIN from the root Makefile, builds:
-  1. Per-locale SD install zips: <stem>-<locale>-<tag>.zip
-        → homebrews|cores/<packed.bin>
-        → homebrews|cores/cavestory.nxpk  (runtime name; locale baked in)
-  2. Debug symbols zip: <stem>-<tag>-debug.zip → ELF, map, README
+Reads PROJECT_KIND from the root Makefile, builds:
+  1. Per-locale SD install zips: CaveStory_<locale>-<tag>.zip
+        → homebrews/CaveStory_<locale>.bin
+        → homebrews/cavestory_<locale>.nxpk
+  2. Debug symbols zip: CaveStory-<tag>-debug.zip → ELF, map, README
 
 Extracts release notes from CHANGELOG.md for the requested tag.
 
 Usage:
-  python3 scripts/stage_release.py --bin CaveStory.bin --tag v1.0.0 --out release \\
-      --elf build/homebrew/CaveStory.elf --map build/homebrew/CaveStory.map \\
-      --nxpk-locale en=sd_content/homebrews/cavestory.nxpk \\
+  python3 scripts/stage_release.py --tag v1.0.0 --out release \\
+      --elf build/homebrew/cavestory_core.elf --map build/homebrew/cavestory_core.map \\
+      --bin-locale en=sd_content/homebrews/CaveStory_en.bin \\
+      --nxpk-locale en=sd_content/homebrews/cavestory_en.nxpk \\
+      --bin-locale fr=sd_content/homebrews/CaveStory_fr.bin \\
       --nxpk-locale fr=sd_content/homebrews/cavestory_fr.nxpk
 """
 
@@ -31,8 +33,6 @@ ROOT = Path(__file__).resolve().parents[1]
 MAKEFILE = ROOT / "Makefile"
 DEFAULT_CHANGELOG = ROOT / "CHANGELOG.md"
 DEBUG_README = ROOT / "scripts" / "DEBUG_README.md"
-# Runtime always opens this name under /homebrews/.
-RUNTIME_NXPK_NAME = "cavestory.nxpk"
 
 MAKE_VARS = (
     "PROJECT_KIND",
@@ -47,6 +47,9 @@ HEADING_RE = re.compile(
     r"^##\s*(?:\[(?P<bracket>[^\]]+)\]|(?P<plain>[^\s#]+))(?:\s*-\s*(?P<date>.+))?\s*$",
     re.MULTILINE,
 )
+
+sys.path.insert(0, str(ROOT / "scripts"))
+from cavestory_locales import hb_bin_name, get_locale  # noqa: E402
 
 
 def read_make_vars() -> dict[str, str]:
@@ -119,19 +122,27 @@ def extract_changelog_section(changelog_path: Path, tag: str) -> str:
     )
 
 
-def parse_nxpk_locale(spec: str) -> tuple[str, Path]:
+def parse_id_path(spec: str, flag: str) -> tuple[str, Path]:
     if "=" not in spec:
         raise SystemExit(
-            f"invalid --nxpk-locale {spec!r}; expected ID=PATH (e.g. fr=sd_content/homebrews/cavestory_fr.nxpk)"
+            f"invalid {flag} {spec!r}; expected ID=PATH "
+            f"(e.g. fr=sd_content/homebrews/cavestory_fr.nxpk)"
         )
     loc_id, path_s = spec.split("=", 1)
     loc_id = loc_id.strip().lower()
-    if not loc_id or not path_s.strip():
-        raise SystemExit(f"invalid --nxpk-locale {spec!r}; expected ID=PATH")
     path = Path(path_s.strip())
+    if not loc_id or not path_s.strip():
+        raise SystemExit(f"invalid {flag} {spec!r}; expected ID=PATH")
     if not path.is_absolute():
         path = ROOT / path
     return loc_id, path
+
+
+def write_zip(archive: Path, members: list[tuple[Path, str]]) -> None:
+    archive.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for src, arcname in members:
+            zf.write(src, arcname)
 
 
 def build_release_notes(
@@ -139,15 +150,13 @@ def build_release_notes(
     tag: str,
     changelog_body: str,
     project_kind: str,
-    packed_name: str,
     sd_dir: str,
     core_name: str,
     docker_image: str,
-    locale_archives: list[tuple[str, str]],
+    locale_archives: list[tuple[str, str, str, str]],
     debug_archive_name: str,
 ) -> str:
     sdk_version = (ROOT / "SDK_VERSION").read_text(encoding="utf-8").strip()
-    install_path = f"/{sd_dir}/{packed_name}"
 
     lines = [
         f"# {tag}",
@@ -157,15 +166,18 @@ def build_release_notes(
         "---",
         "",
         f"- Project kind: `{project_kind}`",
-        f"- Packed binary: `{packed_name}`",
-        f"- SD install path: `{install_path}` + `/{sd_dir}/{RUNTIME_NXPK_NAME}`",
-        "- Language packs (unzip one onto the SD root):",
+        f"- Core id: `{core_name}`",
+        "- Language packs (unzip one onto the SD root; several may coexist):",
     ]
-    for loc_id, archive_name in locale_archives:
-        lines.append(f"  - `{archive_name}` — locale `{loc_id}`")
+    for loc_id, archive_name, bin_name, nxpk_name in locale_archives:
+        lines.append(
+            f"  - `{archive_name}` — `{loc_id}` → `/{sd_dir}/{bin_name}` + "
+            f"`/{sd_dir}/{nxpk_name}`"
+        )
     lines += [
         f"- Debug archive: `{debug_archive_name}` (ELF + linker map)",
         f"- Built with: `{docker_image}`",
+        f"- SDK: `{sdk_version}`",
         "",
         "Crash PC/LR → source (needs `arm-none-eabi-addr2line`):",
         "",
@@ -176,48 +188,39 @@ def build_release_notes(
         "",
         "Or from a checkout of this repo: `python3 scripts/resolve_addr.py --elf …`",
         "",
-        "```",
-        sdk_version,
-        "```",
     ]
-    if project_kind == "core":
-        lines.append(f"- Test ROMs: `/roms/{core_name}/`")
-    else:
-        stem = Path(packed_name).stem
-        lines.append(f"- Optional cover: `/covers/homebrew/{stem}.img`")
-
     return "\n".join(lines) + "\n"
-
-
-def write_zip(archive_path: Path, members: list[tuple[Path, str]]) -> None:
-    if archive_path.exists():
-        archive_path.unlink()
-    with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-        for src, arcname in members:
-            zf.write(src, arcname)
 
 
 def stage_release(
     *,
-    bin_path: Path,
     tag: str,
     out_dir: Path,
     changelog_path: Path,
     docker_image: str | None,
     elf_path: Path | None,
     map_path: Path | None,
-    locale_nxpks: list[tuple[str, Path]],
+    locale_bins: dict[str, Path],
+    locale_nxpks: dict[str, Path],
 ) -> None:
     cfg = read_make_vars()
     project_kind = cfg["PROJECT_KIND"]
-    packed_name = cfg["PACKED_BIN"]
     core_name = cfg["CORE_NAME"]
     resolved_docker = docker_image or cfg.get("DOCKER_IMAGE") or "sylverb/retro-go-sd-builder:v1.5"
 
-    if not bin_path.is_file():
-        raise SystemExit(f"packed binary not found: {bin_path}")
     if not locale_nxpks:
         raise SystemExit("need at least one --nxpk-locale ID=PATH (or --nxpk)")
+
+    missing_bins = sorted(set(locale_nxpks) - set(locale_bins))
+    if missing_bins:
+        raise SystemExit(
+            "missing --bin-locale for: "
+            + ", ".join(missing_bins)
+            + " (or place CaveStory_<loc>.bin next to the nxpk / under --bins-dir)"
+        )
+    extra_bins = sorted(set(locale_bins) - set(locale_nxpks))
+    if extra_bins:
+        raise SystemExit(f"--bin-locale without matching --nxpk-locale: {', '.join(extra_bins)}")
 
     elf = elf_path or (ROOT / cfg["TARGET_ELF"])
     if not elf.is_absolute():
@@ -233,13 +236,12 @@ def stage_release(
     if not DEBUG_README.is_file():
         raise SystemExit(f"debug readme not found: {DEBUG_README}")
 
-    seen: set[str] = set()
-    for loc_id, nxpk in locale_nxpks:
-        if loc_id in seen:
-            raise SystemExit(f"duplicate locale id: {loc_id}")
-        seen.add(loc_id)
+    for loc_id, nxpk in locale_nxpks.items():
         if not nxpk.is_file():
             raise SystemExit(f"NXPK not found for locale {loc_id}: {nxpk}")
+    for loc_id, bin_p in locale_bins.items():
+        if not bin_p.is_file():
+            raise SystemExit(f"GWHB not found for locale {loc_id}: {bin_p}")
 
     changelog_body = extract_changelog_section(changelog_path, tag)
 
@@ -248,34 +250,35 @@ def stage_release(
     sd_root = out_dir / sd_dir
     sd_root.mkdir(parents=True, exist_ok=True)
 
-    sd_bin = sd_root / packed_name
-    shutil.copy2(bin_path, sd_bin)
-
-    stem = Path(packed_name).stem
     tag_slug = slug(tag)
-
-    locale_archives: list[tuple[str, str]] = []
+    locale_archives: list[tuple[str, str, str, str]] = []
     release_files: list[Path] = []
 
-    for loc_id, nxpk in locale_nxpks:
-        # Stage under a locale-specific name on disk, always cavestory.nxpk in the zip.
-        staged_nxpk = sd_root / f"cavestory_{loc_id}.nxpk"
-        shutil.copy2(nxpk, staged_nxpk)
+    for loc_id in sorted(locale_nxpks):
+        bin_src = locale_bins[loc_id]
+        nxpk_src = locale_nxpks[loc_id]
+        bin_name = hb_bin_name(loc_id)
+        nxpk_name = get_locale(loc_id).nxpk
 
-        archive_name = f"{stem}-{loc_id}-{tag_slug}.zip"
+        staged_bin = sd_root / bin_name
+        staged_nxpk = sd_root / nxpk_name
+        shutil.copy2(bin_src, staged_bin)
+        shutil.copy2(nxpk_src, staged_nxpk)
+
+        archive_name = f"CaveStory_{loc_id}-{tag_slug}.zip"
         archive_path = out_dir / archive_name
         write_zip(
             archive_path,
             [
-                (sd_bin, f"{sd_dir}/{packed_name}"),
-                (staged_nxpk, f"{sd_dir}/{RUNTIME_NXPK_NAME}"),
+                (staged_bin, f"{sd_dir}/{bin_name}"),
+                (staged_nxpk, f"{sd_dir}/{nxpk_name}"),
             ],
         )
-        locale_archives.append((loc_id, archive_name))
+        locale_archives.append((loc_id, archive_name, bin_name, nxpk_name))
         release_files.append(archive_path)
         print(f"archive[{loc_id}]={archive_path}")
 
-    debug_archive_name = f"{stem}-{tag_slug}-debug.zip"
+    debug_archive_name = f"CaveStory-{tag_slug}-debug.zip"
     debug_archive_path = out_dir / debug_archive_name
     write_zip(
         debug_archive_path,
@@ -293,7 +296,6 @@ def stage_release(
             tag=tag,
             changelog_body=changelog_body,
             project_kind=project_kind,
-            packed_name=packed_name,
             sd_dir=sd_dir,
             core_name=core_name,
             docker_image=resolved_docker,
@@ -311,8 +313,6 @@ def stage_release(
 
     print(f"release_title={tag}")
     print(f"project_kind={project_kind}")
-    print(f"packed_bin={packed_name}")
-    print(f"sd_path=/{sd_dir}/{packed_name}")
     print(f"debug_archive={debug_archive_path}")
     print(f"notes={notes_path}")
     print(f"files={files_path}")
@@ -324,7 +324,19 @@ def main() -> None:
         "--bin",
         dest="bin_path",
         type=Path,
-        help="packed .bin to stage (default: PACKED_BIN from Makefile, relative to repo root)",
+        help="legacy single GWHB used as fallback for every locale missing --bin-locale",
+    )
+    parser.add_argument(
+        "--bin-locale",
+        action="append",
+        default=[],
+        metavar="ID=PATH",
+        help="locale GWHB to include (repeatable). Zip ships CaveStory_<id>.bin.",
+    )
+    parser.add_argument(
+        "--bins-dir",
+        type=Path,
+        help="directory containing CaveStory_<loc>.bin (fills missing --bin-locale)",
     )
     parser.add_argument(
         "--elf",
@@ -360,7 +372,7 @@ def main() -> None:
         action="append",
         default=[],
         metavar="ID=PATH",
-        help="locale pack to include (repeatable). Zip ships it as cavestory.nxpk.",
+        help="locale pack to include (repeatable). Zip ships cavestory_<id>.nxpk.",
     )
     parser.add_argument(
         "--nxpk",
@@ -370,30 +382,53 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    cfg = read_make_vars()
-    bin_path = args.bin_path or (ROOT / cfg["PACKED_BIN"])
-    if not bin_path.is_absolute():
-        bin_path = ROOT / bin_path
-
     changelog_path = args.changelog
     if not changelog_path.is_absolute():
         changelog_path = ROOT / changelog_path
 
-    locale_nxpks: list[tuple[str, Path]] = []
+    locale_nxpks: dict[str, Path] = {}
     for spec in args.nxpk_locale:
-        locale_nxpks.append(parse_nxpk_locale(spec))
+        loc_id, path = parse_id_path(spec, "--nxpk-locale")
+        locale_nxpks[loc_id] = path
     if args.nxpk_path is not None:
         nxpk = args.nxpk_path if args.nxpk_path.is_absolute() else (ROOT / args.nxpk_path)
-        locale_nxpks.append(("en", nxpk))
+        locale_nxpks.setdefault("en", nxpk)
+
+    locale_bins: dict[str, Path] = {}
+    for spec in args.bin_locale:
+        loc_id, path = parse_id_path(spec, "--bin-locale")
+        locale_bins[loc_id] = path
+
+    bins_dir = args.bins_dir
+    if bins_dir is not None and not bins_dir.is_absolute():
+        bins_dir = ROOT / bins_dir
+
+    legacy_bin = args.bin_path
+    if legacy_bin is not None and not legacy_bin.is_absolute():
+        legacy_bin = ROOT / legacy_bin
+
+    for loc_id in locale_nxpks:
+        if loc_id in locale_bins:
+            continue
+        cand = None
+        if bins_dir is not None:
+            cand = bins_dir / hb_bin_name(loc_id)
+        if cand is None or not cand.is_file():
+            # Same directory as the nxpk (sd_content/homebrews/).
+            cand = locale_nxpks[loc_id].with_name(hb_bin_name(loc_id))
+        if cand.is_file():
+            locale_bins[loc_id] = cand
+        elif legacy_bin is not None and legacy_bin.is_file():
+            locale_bins[loc_id] = legacy_bin
 
     stage_release(
-        bin_path=bin_path,
         tag=args.tag,
         out_dir=(ROOT / args.out).resolve() if not args.out.is_absolute() else args.out,
         changelog_path=changelog_path,
         docker_image=args.docker_image,
         elf_path=args.elf_path,
         map_path=args.map_path,
+        locale_bins=locale_bins,
         locale_nxpks=locale_nxpks,
     )
 

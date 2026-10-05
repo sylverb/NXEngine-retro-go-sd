@@ -55,10 +55,14 @@ static int path_eq_ci(const char *a, const char *b)
     }
 }
 
-/* Strip SD root / leading ./ so lookup keys match pack TOC. */
+/* Strip SD root / leading ./ and resolve a/../b so lookup keys match pack TOC.
+ * sprites.sif uses data/../endpic/pixel.bmp for the Pixel credits portrait. */
 static void normalize_pack_path(const char *in, char *buf, size_t buflen)
 {
     const char *p = in ? in : "";
+    char tmp[GW_NXPK_PATH_LEN];
+    char *parts[24];
+    int nparts = 0;
 
     while (p[0] == '.' && p[1] == '/')
         p += 2;
@@ -78,7 +82,25 @@ static void normalize_pack_path(const char *in, char *buf, size_t buflen)
     while (*p == '/')
         p++;
 
-    snprintf(buf, buflen, "%s", p);
+    snprintf(tmp, sizeof(tmp), "%s", p);
+    for (char *tok = strtok(tmp, "/"); tok; tok = strtok(NULL, "/")) {
+        if (tok[0] == '\0' || (tok[0] == '.' && tok[1] == '\0'))
+            continue;
+        if (tok[0] == '.' && tok[1] == '.' && tok[2] == '\0') {
+            if (nparts > 0)
+                nparts--;
+            continue;
+        }
+        if (nparts < (int)(sizeof(parts) / sizeof(parts[0])))
+            parts[nparts++] = tok;
+    }
+
+    buf[0] = '\0';
+    for (int i = 0; i < nparts; i++) {
+        if (i)
+            strncat(buf, "/", buflen - strlen(buf) - 1);
+        strncat(buf, parts[i], buflen - strlen(buf) - 1);
+    }
 }
 
 int gw_pack_init(const uint8_t *base, uint32_t size)
@@ -400,24 +422,28 @@ size_t __wrap_core_fwrite(const void *ptr, size_t size, size_t nmemb, FILE *stre
 #endif /* !HOST_BUILD */
 #endif /* GW_PACK_STDIO_WRAP */
 
-/* Host / desktop: load cavestory.nxpk (or a locale pack) into malloc. */
+/* Host / desktop: load cavestory_<loc>.nxpk into malloc. */
 int gw_pack_host_load(const char *path_hint)
 {
     static uint8_t *s_host_blob;
-    /* Runtime name first, then common pack-assets locale outputs. */
+    /* Prefer locale-suffixed packs; keep bare cavestory.nxpk as legacy fallback. */
     const char *cands[] = {
         path_hint,
-        "cavestory.nxpk",
+        "CaveStory/cavestory_en.nxpk",
+        "cavestory_en.nxpk",
+        "sd_content/homebrews/cavestory_en.nxpk",
         "CaveStory/cavestory.nxpk",
-        GW_NXPK_PATH,
-        "cavestory_ja.nxpk",
-        "CaveStory/cavestory_ja.nxpk",
-        "cavestory_ko.nxpk",
-        "CaveStory/cavestory_ko.nxpk",
-        "cavestory_fr.nxpk",
+        "cavestory.nxpk",
+        GW_NX_NXPK_PATH,
         "CaveStory/cavestory_fr.nxpk",
-        "sd_content/homebrews/cavestory.nxpk",
+        "cavestory_fr.nxpk",
+        "CaveStory/cavestory_ja.nxpk",
+        "cavestory_ja.nxpk",
+        "CaveStory/cavestory_ko.nxpk",
+        "cavestory_ko.nxpk",
+        "sd_content/homebrews/cavestory_fr.nxpk",
         "sd_content/homebrews/cavestory_ja.nxpk",
+        "sd_content/homebrews/cavestory_ko.nxpk",
         NULL,
     };
 

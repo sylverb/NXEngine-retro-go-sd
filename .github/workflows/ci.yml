@@ -79,13 +79,26 @@ jobs:
         run: |
           set -euo pipefail
           make --no-print-directory ci-assets-all
-          # Verify every catalogued locale pack landed under sd_content/.
           while IFS= read -r loc; do
             nxpk="$(make --no-print-directory -f Makefile print-NXPK LOCALE="${loc}")"
             test -f "${nxpk}"
             echo "ok ${loc} → ${nxpk}"
           done < <(make --no-print-directory -f Makefile print-LOCALE_IDS)
-          test -f "${{ steps.meta.outputs.packed_bin }}"
+
+      # pack_homebrew needs arm-none-eabi-nm (same image as "Build GWHB binary").
+      - name: Pack locale GWHB bins (CaveStory_*.bin)
+        run: |
+          set -euo pipefail
+          docker run --rm --user "$(id -u):$(id -g)" \
+            -v "${{ github.workspace }}:/opt/workdir" \
+            -w /opt/workdir \
+            "${{ env.DOCKER_IMAGE }}" \
+            make --no-print-directory pack-bins
+          while IFS= read -r loc; do
+            bin="$(python3 -c "import sys; sys.path.insert(0,'scripts'); from cavestory_locales import hb_bin_name; print('sd_content/homebrews/' + hb_bin_name(sys.argv[1]))" "${loc}")"
+            test -f "${bin}"
+            echo "ok ${loc} → ${bin}"
+          done < <(make --no-print-directory -f Makefile print-LOCALE_IDS)
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
@@ -95,6 +108,8 @@ jobs:
             ${{ steps.meta.outputs.packed_bin }}
             ${{ steps.meta.outputs.target_elf }}
             ${{ steps.meta.outputs.target_map }}
+            CaveStory_*.bin
+            sd_content/homebrews/CaveStory_*.bin
             sd_content/homebrews/*.nxpk
           if-no-files-found: error
 
@@ -122,23 +137,27 @@ jobs:
       - name: Stage release assets
         run: |
           set -euo pipefail
-          PACKED_BIN="${{ needs.build.outputs.packed_bin }}"
           TARGET_ELF="${{ needs.build.outputs.target_elf }}"
           TARGET_MAP="${{ needs.build.outputs.target_map }}"
 
           nxpk_args=()
+          bin_args=()
           while IFS= read -r loc; do
             nxpk_name="$(python3 -c "import sys; sys.path.insert(0,'scripts'); from cavestory_locales import get_locale; print(get_locale(sys.argv[1]).nxpk)" "${loc}")"
+            bin_name="$(python3 -c "import sys; sys.path.insert(0,'scripts'); from cavestory_locales import hb_bin_name; print(hb_bin_name(sys.argv[1]))" "${loc}")"
             # Artifact download preserves relative paths under dist/.
-            src="dist/sd_content/homebrews/${nxpk_name}"
-            test -f "${src}"
-            nxpk_args+=(--nxpk-locale "${loc}=${src}")
+            nxpk_src="dist/sd_content/homebrews/${nxpk_name}"
+            bin_src="dist/sd_content/homebrews/${bin_name}"
+            test -f "${nxpk_src}"
+            test -f "${bin_src}"
+            nxpk_args+=(--nxpk-locale "${loc}=${nxpk_src}")
+            bin_args+=(--bin-locale "${loc}=${bin_src}")
           done < <(make --no-print-directory -f Makefile print-LOCALE_IDS)
 
           python3 scripts/stage_release.py \
-            --bin "dist/${PACKED_BIN}" \
             --elf "dist/${TARGET_ELF}" \
             --map "dist/${TARGET_MAP}" \
+            "${bin_args[@]}" \
             "${nxpk_args[@]}" \
             --tag "${GITHUB_REF_NAME}" \
             --out release \

@@ -12,8 +12,12 @@ Fan translations (`--locale fr`, …) are usually data overlays:
   2. Download the locale archive and merge its `data/` (and siblings) over
      CaveStory/, keeping Doukutsu.exe + extracted music/SFX assets
 
-Korean (`--locale ko`): Japanese base + UTF-8 TSC scraped from cavestory.one
-(the published `cavestory_k.7z` is a Windows PatchProgram, not a data tree).
+Japanese (`--locale ja`): English extract (music/org/endpic) + JP `data/`
+overlay. JP Doukutsu.exe uses different ORG offsets — never extract music
+from it. Stage captions come from JP Doukutsu (Shift-JIS → UTF-8).
+
+Korean (`--locale ko`): EN music + JP data/ sprites + UTF-8 TSC scraped from
+cavestory.one (the published `cavestory_k.7z` is a Windows PatchProgram).
 Pass `--archive` with a real `data/` zip to skip the web scrape.
 
 Audio caches (drum.pcm / sndcache.pcm): ./CaveStory_host --ci-prepare
@@ -291,6 +295,33 @@ def prepare_english(
             tmp_dir.cleanup()
 
 
+def find_doukutsu_exe(root: Path) -> Path | None:
+    """Return Doukutsu.exe under root, if any."""
+    for name in ("Doukutsu.exe", "doukutsu.exe"):
+        hit = next(root.rglob(name), None)
+        if hit is not None and hit.is_file():
+            return hit
+    return None
+
+
+def apply_locale_stage_dat(
+    tree: Path,
+    locale_exe: Path,
+    *,
+    caption_encoding: str,
+) -> None:
+    """Overwrite stage.dat captions from a locale Doukutsu.exe (cp932→UTF-8)."""
+    print(
+        f"extracting stage.dat captions from {locale_exe.name} "
+        f"({caption_encoding})"
+    )
+    extract_stages(
+        locale_exe.read_bytes(),
+        tree,
+        caption_encoding=caption_encoding,
+    )
+
+
 def merge_overlay(tree: Path, overlay_root: Path) -> None:
     """Replace CaveStory/data/ with the translation payload; keep music/extract."""
     data_src = overlay_root / "data"
@@ -323,8 +354,9 @@ def prepare_overlay_locale(
     keep: bool,
     *,
     base_check_crc: bool = True,
+    stage_caption_encoding: str | None = None,
 ) -> Path:
-    # 1) Full base (usually EN; KO uses JA) with Doukutsu extract
+    # 1) Full base (usually EN; KO uses EN+JA data) with Doukutsu extract
     tree = prepare_english(
         outdir, archive=None, url=base_url, keep=keep, check_crc=base_check_crc
     )
@@ -355,6 +387,22 @@ def prepare_overlay_locale(
             shutil.rmtree(extract_root)
         extract_archive(arch, extract_root)
         overlay = find_data_root(extract_root)
+        # JP stage captions live in Doukutsu.exe (same table offset as EN).
+        if stage_caption_encoding and stage_caption_encoding.lower() not in (
+            "ascii",
+            "cp1252",
+            "latin-1",
+        ):
+            locale_exe = find_doukutsu_exe(extract_root)
+            if locale_exe is not None:
+                apply_locale_stage_dat(
+                    tree, locale_exe, caption_encoding=stage_caption_encoding
+                )
+            else:
+                print(
+                    f"  [warn] no Doukutsu.exe in locale archive — "
+                    f"keeping base stage.dat captions"
+                )
         merge_overlay(tree, overlay)
         shutil.rmtree(extract_root, ignore_errors=True)
         return tree
@@ -368,10 +416,18 @@ def prepare_korean(
     archive: Path | None,
     keep: bool,
 ) -> Path:
-    """Japanese Doukutsu base + Korean TSC (web scrape or real data archive)."""
-    base = get_locale("ja")
-    tree = prepare_english(
-        outdir, archive=None, url=base.url, keep=keep, check_crc=False
+    """EN music extract + Japanese data/ sprites + Korean TSC."""
+    en = get_locale("en")
+    ja = get_locale("ja")
+    # EN base: valid org/pxt/endpic. Then JP data/ for CJK sprites/UI.
+    tree = prepare_overlay_locale(
+        outdir,
+        locale_archive=None,
+        locale_url=ja.url,
+        base_url=en.url,
+        keep=keep,
+        base_check_crc=True,
+        stage_caption_encoding=ja.text_encoding,
     )
 
     if archive is not None:
@@ -452,11 +508,13 @@ def main() -> int:
     print(f"locale={loc.id} ({loc.name}) kind={loc.kind}")
     print(f"nxpk target name: {loc.nxpk}")
 
-    # EN AGTP CRCs are authoritative; JP freeware differs in credit BMPs.
-    check_crc = not loc.cjk and loc.id != "ja"
+    # EN AGTP CRCs are authoritative; never extract org/endpic from JP exe.
+    check_crc = loc.id == "en" or (
+        loc.kind == "full" and not loc.cjk and loc.id != "ja"
+    )
 
     if loc.id == "ko":
-        # Default: JA base + cavestory.one UTF-8 TSC (PatchProgram is unusable).
+        # EN music + JP data/ + cavestory.one UTF-8 TSC (PatchProgram is unusable).
         tree = prepare_korean(outdir, args.archive, args.keep_zip)
     elif loc.kind == "full":
         tree = prepare_english(
@@ -464,7 +522,8 @@ def main() -> int:
         )
     elif loc.kind == "overlay":
         base = get_locale(loc.base_locale or "en")
-        base_check_crc = not base.cjk and base.id != "ja"
+        base_check_crc = base.id == "en" or (not base.cjk and base.id != "ja")
+        stage_enc = loc.text_encoding if loc.cjk else None
         tree = prepare_overlay_locale(
             outdir,
             locale_archive=args.archive,
@@ -472,6 +531,7 @@ def main() -> int:
             base_url=base.url,
             keep=args.keep_zip,
             base_check_crc=base_check_crc,
+            stage_caption_encoding=stage_enc,
         )
     else:
         raise SystemExit(f"unsupported locale kind: {loc.kind}")

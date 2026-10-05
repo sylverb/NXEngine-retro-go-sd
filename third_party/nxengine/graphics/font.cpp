@@ -722,7 +722,9 @@ bool use_utf8 = cjkfont_loaded();
 				if (cjk_h > 9)
 					y_cjk = y - ((cjk_h - 9) / 2) * (SCALE > 0 ? SCALE : 1);
 				int adv = cjkfont_draw_glyph(x, y_cjk, cp, rgb, rendering);
-				x += spacing ? spacing : adv;
+				/* Never apply Latin letter-spacing to CJK — SaveSelect used to
+				 * pass spacing=5 and crush 12px Hangul/Kanji into overlapping mush. */
+				x += adv;
 			}
 			(void)before;
 			gi++;

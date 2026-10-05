@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Pack Cave Story assets into a single cavestory.nxpk for G&W XIP.
+Pack Cave Story assets into a single cavestory_<locale>.nxpk for G&W XIP.
 
 Format (version 1):
   magic "NXPK" (4) + version u16=1 + count u16
@@ -11,9 +11,9 @@ Images are stored as 8bpp BMP under the *logical* game path (e.g. data/Npc/NpcSy
 TSC scripts are stored already decrypted (same algorithm as NXEngine tsc_decrypt).
 
 Usage:
-  python3 scripts/pack_cavestory_nxpk.py CaveStory
-  python3 scripts/pack_cavestory_nxpk.py CaveStory -o CaveStory/cavestory.nxpk
-  make pack-assets
+  python3 scripts/pack_cavestory_nxpk.py CaveStory --locale en
+  python3 scripts/pack_cavestory_nxpk.py CaveStory -o CaveStory/cavestory_fr.nxpk
+  make pack-assets LOCALE=fr
 """
 from __future__ import annotations
 
@@ -46,6 +46,7 @@ EXCLUDE_NAMES = {
     "settings.dat",
     "debug.txt",
     "thumbs.db",
+    "cavestory_en.nxpk",
     "cavestory.nxpk",
     "cavestory_fr.nxpk",
     "cavestory_ja.nxpk",
@@ -374,7 +375,7 @@ def main() -> int:
         "-o",
         "--output",
         default=None,
-        help="Output path (default: <root>/cavestory.nxpk)",
+        help="Output path (default: <root>/cavestory_<locale>.nxpk)",
     )
     ap.add_argument(
         "--also-sd",
@@ -392,7 +393,7 @@ def main() -> int:
         print(f"error: not a directory: {root}", file=sys.stderr)
         return 1
 
-    default_name = "cavestory.nxpk"
+    default_name = "cavestory_en.nxpk"
     loc = None
     if args.locale:
         sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -432,13 +433,13 @@ def main() -> int:
             stage_path.write_bytes(converted)
             print(f"[CJK] stage.dat names → UTF-8 ({stage_path.stat().st_size} bytes)")
 
-        # Yes/No, AIR, title menu are bitmaps — rewrite for Korean.
-        if loc and loc.id == "ko":
+        # Yes/No, AIR, title menu are bitmaps — rewrite for Korean / strip JP bullets.
+        if loc and loc.id in ("ko", "ja"):
             import subprocess
 
             ui = Path(__file__).resolve().parent / "localize_ui_sprites.py"
             subprocess.run(
-                [sys.executable, str(ui), str(root), "--locale", "ko"],
+                [sys.executable, str(ui), str(root), "--locale", loc.id],
                 check=True,
             )
 

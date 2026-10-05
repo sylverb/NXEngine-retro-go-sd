@@ -1,6 +1,8 @@
 # Retro-Go SD — Cave Story (NXEngine) GWHB homebrew
 #
-#   make                 → CaveStory.bin (device, links NXEngine)
+#   make                 → CaveStory_en.bin (device; LOCALE=en default)
+#   make LOCALE=fr pack  → CaveStory_fr.bin (same ELF, locale display name)
+#   make pack-bins       → CaveStory_<loc>.bin for every CI locale
 #   make host            → CaveStory_host (desktop SDL 1.2)
 #   make docker
 
@@ -59,14 +61,18 @@ BUILD_DIR ?= build/$(PROJECT_KIND)
 #######################################
 # Kind-specific compile defs + packing
 #######################################
+# Locale for GWHB name + asset packs (en, fr, ja, …).
+LOCALE ?= en
+LOCALE_UPPER := $(shell printf '%s' '$(LOCALE)' | tr 'a-z' 'A-Z')
+
 ifeq ($(PROJECT_KIND),core)
 $(error This project is a GWHB homebrew — use PROJECT_KIND=homebrew)
 else ifeq ($(PROJECT_KIND),homebrew)
 CORE_C_DEFS += \
 -DPROJECT_KIND_HOMEBREW=1
 
-PACKED_BIN := CaveStory.bin
-HB_NAME    := Cave Story
+PACKED_BIN := CaveStory_$(LOCALE).bin
+HB_NAME    := Cave Story $(LOCALE_UPPER)
 COVER_SRC  := src/assets/cover.png
 
 else
@@ -111,7 +117,7 @@ print-CORE_VERSION:
 	@echo $(CORE_VERSION)
 
 clean::
-	$(V)rm -f $(PACKED_BIN)
+	$(V)rm -f CaveStory_*.bin
 
 #######################################
 # Docker
@@ -146,11 +152,8 @@ docker_shell:
 #######################################
 include host/Makefile.nxengine_host
 
-# Locale for asset packs: en (default), fr, … — see scripts/cavestory_locales.py
-LOCALE ?= en
-
 .PHONY: host_scaffold prepare-assets pack-assets prepare-cavestory-tree ci-assets \
-	ci-assets-all pack-assets-fr list-locales
+	ci-assets-all pack-assets-fr pack-bins list-locales
 host_scaffold:
 	$(MAKE) -f host/Makefile.host_scaffold host
 
@@ -171,7 +174,7 @@ prepare-cavestory-tree:
 	$(V)$(ECHO) "[ CS ]" prepare CaveStory/ locale=$(LOCALE)
 	$(V)python3 scripts/prepare_cavestory_tree.py --locale $(LOCALE)
 
-# Full asset pipeline: tree → host audio caches → cavestory[_xx].nxpk.
+# Full asset pipeline: tree → host audio caches → cavestory_<loc>.nxpk.
 # Prepare CaveStory/ *before* `make host` — host_nx_prepare needs data/npc.tbl.
 #   make ci-assets
 #   make ci-assets LOCALE=fr
@@ -199,9 +202,8 @@ ci-assets-all:
 	done
 
 # Build NXPK (8bpp images + cleartext TSC) and copy to sd_content/homebrews/.
-# Runtime still loads /homebrews/cavestory.nxpk — rename/copy the locale file
-# on the SD card (e.g. cavestory_fr.nxpk → cavestory.nxpk). Release zips do
-# that rename for you (CaveStory-<locale>-<tag>.zip).
+# Pair with CaveStory_<loc>.bin (make pack / pack-bins); runtime opens
+# /homebrews/cavestory_<loc>.nxpk from the GWHB stem.
 pack-assets:
 	$(V)$(ECHO) "[ NXPK ]" locale=$(LOCALE)
 	$(V)python3 scripts/pack_cavestory_nxpk.py CaveStory --locale $(LOCALE) --also-sd
@@ -214,9 +216,31 @@ pack-assets:
 pack-assets-fr:
 	$(V)$(MAKE) --no-print-directory ci-assets LOCALE=fr
 
-.PHONY: print-NXPK print-LOCALE_IDS
+# Re-pack the current ELF into CaveStory_<loc>.bin for every CI locale
+# (same code image; different GWHB --name / filename). Needs arm-none-eabi-nm
+# (use `make docker` / CI docker step if the host has no ARM toolchain).
+pack-bins: $(TARGET_BIN) $(COVER_SRC)
+	$(V)$(ECHO) "[ PACK GWHB ] all CI locales version=$(CORE_VERSION)"
+	$(V)mkdir -p sd_content/homebrews
+	$(V)set -e; \
+	for loc in $$(python3 scripts/cavestory_locales.py --ids --ci); do \
+		upper=$$(printf '%s' "$$loc" | tr 'a-z' 'A-Z'); \
+		out="CaveStory_$${loc}.bin"; \
+		name="Cave Story $${upper}"; \
+		$(ECHO) "[ PACK GWHB ] $$out ($$name)"; \
+		python3 $(PACK_HOMEBREW) \
+			--elf $(TARGET_ELF) --bin $(TARGET_BIN) \
+			--name "$$name" --version "$(CORE_VERSION)" \
+			--cover $(COVER_SRC) \
+			--out "$$out"; \
+		cp -f "$$out" "sd_content/homebrews/$$out"; \
+	done
+
+.PHONY: print-NXPK print-LOCALE_IDS print-HB_NAME
 print-NXPK:
 	@python3 -c "import sys; sys.path.insert(0,'scripts'); from cavestory_locales import get_locale; \
 print('sd_content/homebrews/' + get_locale('$(LOCALE)').nxpk)"
 print-LOCALE_IDS:
 	@python3 scripts/cavestory_locales.py --ids --ci
+print-HB_NAME:
+	@echo $(HB_NAME)

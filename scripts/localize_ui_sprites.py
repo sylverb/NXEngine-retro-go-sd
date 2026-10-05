@@ -4,8 +4,12 @@
 These strings live in TextBox.pbm / Title.pbm sprites, not TSC — so a scripts-only
 Korean overlay still shows Japanese はい/いいえ, くうき, 洞窟物語, etc.
 
+Japanese Title.pbm bakes a 「・」 bullet into each SPR_MENU frame; NXEngine also
+draws the character cursor to the left, so those bullets look like stray dots.
+
 Usage:
   python3 scripts/localize_ui_sprites.py CaveStory --locale ko
+  python3 scripts/localize_ui_sprites.py CaveStory --locale ja
 """
 from __future__ import annotations
 
@@ -27,6 +31,8 @@ AIR_YS = (72, 80)
 RESETPROMPT = dict(x=0, y=128, w=208, h=16)
 TITLE = dict(x=0, y=0, w=140, h=32)
 MENU = dict(x=140, w=40, h=16)
+# JP 「・」 sits in the leftmost columns of each 40×16 menu frame.
+MENU_BULLET_COLS = 4
 
 COL_WHITE = (255, 255, 255, 255)
 COL_SHADOW = (25, 33, 66, 255)
@@ -171,10 +177,10 @@ def _western_pack_candidates() -> list[Path]:
     host copy of the locale under test (ko/ja) and must not be trusted.
     """
     return [
-        REPO_ROOT / "sd_content" / "homebrews" / "cavestory.nxpk",
         REPO_ROOT / "sd_content" / "homebrews" / "cavestory_en.nxpk",
         REPO_ROOT / "sd_content" / "homebrews" / "cavestory_fr.nxpk",
-        REPO_ROOT / "homebrews" / "cavestory.nxpk",
+        REPO_ROOT / "sd_content" / "homebrews" / "cavestory.nxpk",
+        REPO_ROOT / "homebrews" / "cavestory_en.nxpk",
         REPO_ROOT / "CaveStory" / "cavestory_en.nxpk",
         REPO_ROOT / "CaveStory" / "cavestory_fr.nxpk",
     ]
@@ -216,6 +222,32 @@ def restore_english_title_logo(title_rgba: Image.Image) -> None:
     logo = en.crop((0, 0, TITLE["w"], TITLE["h"]))
     title_rgba.paste(logo, (TITLE["x"], TITLE["y"]))
     print(f"  [ui] title logo ← English wordmark from {nxpk.name}")
+
+
+def strip_jp_menu_bullets(title_rgba: Image.Image) -> int:
+    """Erase baked-in 「・」 bullets from SPR_MENU frames (title.cpp draws its own cursor)."""
+    cleared = 0
+    px = title_rgba.load()
+    for frame_y in (0, 16):
+        for y in range(frame_y, frame_y + MENU["h"]):
+            for x in range(MENU["x"], MENU["x"] + MENU_BULLET_COLS):
+                r, g, b, a = px[x, y]
+                if a and (r, g, b) != (0, 0, 0):
+                    px[x, y] = (0, 0, 0, 255)
+                    cleared += 1
+    return cleared
+
+
+def localize_ja(root: Path) -> None:
+    """Keep JP title logo/menu text; only remove duplicate menu bullets."""
+    title_path = root / "data" / "Title.pbm"
+    if not title_path.is_file():
+        raise SystemExit(f"missing Title.pbm under {root}/data")
+
+    title, title_pal = open_sheet(title_path)
+    n = strip_jp_menu_bullets(title)
+    save_sheet(title_path, title, title_pal)
+    print(f"  [ui] {title_path.relative_to(root)} ← stripped {n} menu-bullet pixels")
 
 
 def localize_ko(root: Path) -> None:
@@ -268,11 +300,15 @@ def main() -> int:
     ap.add_argument("root", nargs="?", default="CaveStory", type=Path)
     ap.add_argument("--locale", default="ko")
     args = ap.parse_args()
-    if args.locale != "ko":
+    if args.locale == "ko":
+        print(f"[UI] localizing sprites in {args.root} (ko)")
+        localize_ko(args.root)
+    elif args.locale == "ja":
+        print(f"[UI] localizing sprites in {args.root} (ja)")
+        localize_ja(args.root)
+    else:
         print(f"[UI] locale {args.locale}: no sprite rewrite")
         return 0
-    print(f"[UI] localizing sprites in {args.root} (ko)")
-    localize_ko(args.root)
     return 0
 
 

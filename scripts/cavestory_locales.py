@@ -49,7 +49,7 @@ LOCALES: dict[str, Locale] = {
         id="en",
         name="English (Aeon Genesis pre-patched)",
         url=f"{BASE_URL}/cavestoryen.zip",
-        nxpk="cavestory.nxpk",
+        nxpk="cavestory_en.nxpk",
         kind="full",
         notes="Default CI pack.",
     ),
@@ -98,10 +98,16 @@ LOCALES: dict[str, Locale] = {
         name="Japanese (Studio Pixel 1.0.0.6)",
         url=f"{BASE_URL}/dou_1006.zip",
         nxpk="cavestory_ja.nxpk",
-        kind="full",
+        # JP Doukutsu.exe ORG/endpic offsets differ from EN — overlay JP data/
+        # onto an English extract so music/SFX/credits stay valid.
+        kind="overlay",
         text_encoding="cp932",
         cjk=True,
-        notes="Shift-JIS TSC → UTF-8 + cjkfont.dat (Fusion Pixel 12px).",
+        base_locale="en",
+        notes=(
+            "JP data/ on EN Doukutsu extract (org/pxt/endpic). "
+            "Shift-JIS TSC + stage captions → UTF-8 + cjkfont.dat."
+        ),
     ),
     "ko": Locale(
         id="ko",
@@ -112,12 +118,12 @@ LOCALES: dict[str, Locale] = {
         nxpk="cavestory_ko.nxpk",
         kind="overlay",
         text_encoding="utf-8",
-        base_locale="ja",
+        base_locale="en",
         cjk=True,
         ci=True,
         notes=(
-            "JA Doukutsu base + Korean TSC from cavestory.one script pages "
-            "(UTF-8); pack bakes Fusion Pixel cjkfont.dat + KO UI bitmaps. "
+            "EN Doukutsu extract (music) + JP data/ sprites + Korean TSC from "
+            "cavestory.one; pack bakes Fusion Pixel cjkfont.dat + KO UI bitmaps. "
             "Optional `--archive` with a real data/ tree still works."
         ),
     ),
@@ -145,6 +151,16 @@ def get_locale(locale_id: str) -> Locale:
         known = ", ".join(sorted(LOCALES))
         raise SystemExit(f"unknown locale {locale_id!r}; known: {known}")
     return LOCALES[key]
+
+
+def hb_bin_name(locale_id: str) -> str:
+    """GWHB filename on SD: CaveStory_<loc>.bin"""
+    return f"CaveStory_{locale_id.strip().lower()}.bin"
+
+
+def hb_display_name(locale_id: str) -> str:
+    """Launcher display name: Cave Story EN / Cave Story FR / …"""
+    return f"Cave Story {locale_id.strip().upper()}"
 
 
 def locale_ids(*, ci_only: bool = False) -> list[str]:

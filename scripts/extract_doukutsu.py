@@ -156,6 +156,8 @@ PXT_SOUNDS = [
 NMAPS = 95
 STAGE_DATA_OFFSET = 0x937B0
 EXE_MAP_REC = 200  # sizeof(EXEMapRecord) on MSVC freeware build
+# MapRecord.stagename[35] — leave one byte for NUL.
+STAGE_NAME_MAX = 34
 
 BACKDROP_NAMES = [
     "bk0", "bkBlue", "bkGreen", "bkBlack", "bkGard", "bkMaze",
@@ -178,8 +180,9 @@ def crc32_ieee(data: bytes) -> int:
     return zlib.crc32(data) & 0xFFFFFFFF
 
 
-def cstr(buf: bytes) -> str:
-    return buf.split(b"\0", 1)[0].decode("ascii", errors="replace")
+def cstr(buf: bytes, encoding: str = "ascii") -> str:
+    raw = buf.split(b"\0", 1)[0]
+    return raw.decode(encoding, errors="replace")
 
 
 def find_index(name: str, names: list[str]) -> int:
@@ -191,11 +194,31 @@ def find_index(name: str, names: list[str]) -> int:
 
 
 def extract_files(exe: bytes, outdir: Path, *, check_crc: bool = True) -> None:
+    # JP Doukutsu layout differs — refuse EN offsets that do not look like ORGs
+    # before writing any endpic/org blobs.
+    for rel, offset, length, expect_crc, header in FILES:
+        if not rel.startswith("org/"):
+            continue
+        chunk = exe[offset : offset + length]
+        if len(chunk) != length or not chunk.startswith(b"Org-02"):
+            raise SystemExit(
+                f"{rel} at EN offset 0x{offset:x} is not Org-02 "
+                f"(got {chunk[:6]!r}). Extract org/pxt/endpic from English "
+                "Doukutsu.exe instead (prepare JA/KO as EN base + data overlay)."
+            )
+        if check_crc:
+            got = crc32_ieee(chunk)
+            if got != expect_crc:
+                raise SystemExit(
+                    f"CRC mismatch for {rel}: got 0x{got:08x}, expected 0x{expect_crc:08x} "
+                    "(need freeware Doukutsu.exe 1.0.0.6 / AGTP English)"
+                )
+
     for rel, offset, length, expect_crc, header in FILES:
         chunk = exe[offset : offset + length]
         if len(chunk) != length:
             raise SystemExit(f"short read for {rel} at 0x{offset:x}")
-        if check_crc:
+        if check_crc and not rel.startswith("org/"):
             got = crc32_ieee(chunk)
             if got != expect_crc:
                 raise SystemExit(
@@ -260,7 +283,18 @@ def extract_pxt(exe: bytes, outdir: Path) -> None:
         print(f"  [pxt ] {out.relative_to(outdir)}")
 
 
-def extract_stages(exe: bytes, outdir: Path) -> None:
+def extract_stages(
+    exe: bytes,
+    outdir: Path,
+    *,
+    caption_encoding: str = "ascii",
+) -> None:
+    """Write stage.dat from the freeware map table.
+
+    Filenames / tileset ids stay ASCII. Captions are decoded with
+    ``caption_encoding`` (``cp932`` for Japanese Doukutsu) and stored as
+    UTF-8 so CJK packs do not bake ``?`` mojibake into save-select names.
+    """
     raw = exe[STAGE_DATA_OFFSET : STAGE_DATA_OFFSET + NMAPS * EXE_MAP_REC]
     if len(raw) != NMAPS * EXE_MAP_REC:
         raise SystemExit("short read for stage table")
@@ -276,7 +310,7 @@ def extract_stages(exe: bytes, outdir: Path) -> None:
         npc1 = cstr(raw[base + 100 : base + 132])
         npc2 = cstr(raw[base + 132 : base + 164])
         boss_no = raw[base + 164]
-        caption = cstr(raw[base + 165 : base + 200])
+        caption = cstr(raw[base + 165 : base + 200], caption_encoding)
 
         ti = find_index(tileset, TILESET_NAMES)
         bi = find_index(background, BACKDROP_NAMES)
@@ -290,7 +324,11 @@ def extract_stages(exe: bytes, outdir: Path) -> None:
 
         rec = bytearray(73)
         fb = filename.encode("ascii", errors="replace")[:31]
-        sb = caption.encode("ascii", errors="replace")[:34]
+        # UTF-8 captions for CJK; ASCII path keeps legacy English stage.dat.
+        if caption_encoding.lower() in ("ascii", "latin-1", "cp1252"):
+            sb = caption.encode("ascii", errors="replace")[:34]
+        else:
+            sb = caption.encode("utf-8")[:STAGE_NAME_MAX]
         rec[0 : len(fb)] = fb
         rec[32 : 32 + len(sb)] = sb
         rec[67] = ti
@@ -303,7 +341,10 @@ def extract_stages(exe: bytes, outdir: Path) -> None:
 
     out = outdir / "stage.dat"
     out.write_bytes(bytes(records))
-    print(f"  [stage] stage.dat ({len(records)} bytes, {NMAPS} maps)")
+    print(
+        f"  [stage] stage.dat ({len(records)} bytes, {NMAPS} maps, "
+        f"captions={caption_encoding})"
+    )
 
 
 def main() -> int:

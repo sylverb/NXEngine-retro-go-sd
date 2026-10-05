@@ -10,6 +10,7 @@
 #include "gw_lcd.h"
 #include "gw_audio.h"
 #include "odroid_system.h"
+#include "odroid_input.h"
 #include "odroid_overlay.h"
 #include "appid.h"
 #include "gw_malloc.h"
@@ -36,6 +37,80 @@ int nx_engine_main(void);
 #endif
 
 #define APP_ID APPID_HOMEBREW
+
+static void ascii_tolower_copy(char *dst, size_t dstlen, const char *src)
+{
+    size_t i = 0;
+    if (dstlen == 0)
+        return;
+    for (; src[i] && i + 1 < dstlen; i++) {
+        unsigned char c = (unsigned char)src[i];
+        if (c >= 'A' && c <= 'Z')
+            c = (unsigned char)(c - 'A' + 'a');
+        dst[i] = (char)c;
+    }
+    dst[i] = '\0';
+}
+
+static const char *basename_of(const char *path)
+{
+    const char *base = path;
+    for (const char *p = path; *p; p++) {
+        if (*p == '/' || *p == '\\')
+            base = p + 1;
+    }
+    return base;
+}
+
+char *gw_nx_resolve_nxpk_path(char *buf, size_t buflen)
+{
+    char stem[64];
+    const char *raw = "cavestory";
+
+#ifndef HOST_BUILD
+    /* Prefer the SD filename (CaveStory_fr.bin) over the GWHB display
+     * name ("Cave Story FR") — the latter is launcher UI only. */
+    if (ACTIVE_FILE) {
+        if (ACTIVE_FILE->path[0])
+            raw = basename_of(ACTIVE_FILE->path);
+        else if (ACTIVE_FILE->name[0])
+            raw = ACTIVE_FILE->name;
+    }
+#endif
+
+    ascii_tolower_copy(stem, sizeof(stem), basename_of(raw));
+    /* Strip trailing .bin if the launcher stored the full filename. */
+    {
+        size_t n = strlen(stem);
+        if (n > 4 && strcmp(stem + n - 4, ".bin") == 0)
+            stem[n - 4] = '\0';
+    }
+
+    /* Display-name fallback: "cave story fr" → "cavestory_fr". */
+    if (strncmp(stem, "cave story", 10) == 0) {
+        const char *rest = stem + 10;
+        char loc[8];
+        size_t i = 0;
+
+        while (*rest == ' ')
+            rest++;
+        for (; rest[i] && rest[i] != ' ' && i + 1 < sizeof(loc); i++)
+            loc[i] = rest[i];
+        loc[i] = '\0';
+        if (loc[0])
+            snprintf(stem, sizeof(stem), "cavestory_%s", loc);
+        else
+            snprintf(stem, sizeof(stem), "cavestory");
+    }
+
+    if (stem[0] == '\0')
+        snprintf(stem, sizeof(stem), "cavestory");
+
+    if (buflen < strlen(GW_NX_DATA_ROOT) + 1 + strlen(stem) + 5 + 1)
+        return NULL;
+    snprintf(buf, buflen, "%s/%s.nxpk", GW_NX_DATA_ROOT, stem);
+    return buf;
+}
 
 static bool SaveState(const char *path) { (void)path; return false; }
 static bool LoadState(const char *path) { (void)path; return false; }
@@ -83,6 +158,59 @@ static void boot_banner(const char *line1, const char *line2)
     lcd_swap();
 }
 
+/* Boot failure: show a short message, wait for a button, return to Retro-Go.
+ * Never spin forever — that leaves the device unusable without a battery pull. */
+static void fatal_return_to_launcher(const char *line1, const char *line2)
+    __attribute__((noreturn));
+static void fatal_return_to_launcher(const char *line1, const char *line2)
+{
+    const uint16_t fg = 0xFFFF;
+    const uint16_t bg = 0x0000;
+
+    printf("NXEngine: FATAL — %s | %s | ram_free=%u\n",
+           line1 ? line1 : "", line2 ? line2 : "",
+           (unsigned)ram_get_free_size());
+
+    odroid_overlay_draw_fill_rect(0, 0, GW_LCD_WIDTH, GW_LCD_HEIGHT, bg);
+    odroid_overlay_draw_text(8, 72, GW_LCD_WIDTH - 16,
+                             line1 ? line1 : "Error", fg, bg);
+    if (line2 && line2[0])
+        odroid_overlay_draw_text(8, 96, GW_LCD_WIDTH - 16, line2, fg, bg);
+    odroid_overlay_draw_text(8, 152, GW_LCD_WIDTH - 16,
+                             "Press any button", fg, bg);
+    odroid_overlay_draw_text(8, 176, GW_LCD_WIDTH - 16,
+                             "to return to menu", fg, bg);
+    lcd_swap();
+
+#ifndef HOST_BUILD
+    /* Ignore buttons still held from launch, then wait for a fresh press. */
+    for (;;) {
+        odroid_gamepad_state_t j;
+        wdog_refresh();
+        odroid_input_read_gamepad(&j);
+        if (j.bitmask == 0)
+            break;
+        HAL_Delay(16);
+    }
+    for (;;) {
+        odroid_gamepad_state_t j;
+        wdog_refresh();
+        odroid_input_read_gamepad(&j);
+        if (j.bitmask != 0)
+            break;
+        HAL_Delay(16);
+    }
+    odroid_system_switch_app(0);
+#else
+    while (1) {
+        wdog_refresh();
+        HAL_Delay(100);
+    }
+#endif
+    while (1) {
+    }
+}
+
 void app_main(uint8_t load_state, uint8_t start_paused, int8_t save_slot)
 {
     (void)load_state;
@@ -112,30 +240,23 @@ void app_main(uint8_t load_state, uint8_t start_paused, int8_t save_slot)
     (void)odroid_sdcard_mkdir(GW_NX_SAVE_DIR);
 #endif
 
-    /* One SD→flash cache of cavestory.nxpk; subsequent boots hit XIP. */
+    /* One SD→flash cache of cavestory_<loc>.nxpk; subsequent boots hit XIP. */
     odroid_overlay_draw_progress_bar("Cave Story data", 0);
 #ifdef HOST_BUILD
-    if (gw_pack_host_load("CaveStory/cavestory.nxpk") != 0 &&
-        gw_pack_host_load("cavestory.nxpk") != 0) {
-        printf("NXEngine: FATAL — missing cavestory.nxpk (make pack-assets)\n");
-        boot_banner("missing nxpk", "make pack-assets");
-        while (1) {
-            wdog_refresh();
-            HAL_Delay(100);
-        }
-    }
+    if (gw_pack_host_load(NULL) != 0)
+        fatal_return_to_launcher("missing nxpk", "make pack-assets");
 #else
     {
+        char nxpk_path[GW_NX_NXPK_PATH_MAX];
         uint32_t pack_sz = 0;
-        uint8_t *pack = odroid_overlay_cache_file_in_flash(GW_NXPK_PATH, &pack_sz, false);
-        if (!pack || pack_sz == 0) {
-            printf("NXEngine: FATAL — missing %s\n", GW_NXPK_PATH);
-            boot_banner("missing nxpk", GW_NXPK_PATH);
-            while (1) {
-                wdog_refresh();
-                HAL_Delay(100);
-            }
-        }
+        uint8_t *pack;
+
+        if (!gw_nx_resolve_nxpk_path(nxpk_path, sizeof(nxpk_path)))
+            fatal_return_to_launcher("nxpk path", "too long");
+        printf("NXEngine: loading %s\n", nxpk_path);
+        pack = odroid_overlay_cache_file_in_flash(nxpk_path, &pack_sz, false);
+        if (!pack || pack_sz == 0)
+            fatal_return_to_launcher("missing nxpk", nxpk_path);
         /* Circular flash cache can place a hit anywhere in EXTFLASH. Log the
          * absolute address so "works after settings reset" regressions are
          * obvious (old builds freed XIP above 0x91000000 / 0x92000000). */
@@ -145,15 +266,8 @@ void app_main(uint8_t load_state, uint8_t start_paused, int8_t save_slot)
         /* Touch first + last byte through the mmap window before trusting TOC. */
         volatile uint8_t probe = pack[0] ^ pack[pack_sz - 1];
         (void)probe;
-        if (gw_pack_init(pack, pack_sz) != 0) {
-            printf("NXEngine: FATAL — bad NXPK (%u bytes @ %p)\n",
-                   (unsigned)pack_sz, (void *)pack);
-            boot_banner("bad nxpk", "clear flash cache");
-            while (1) {
-                wdog_refresh();
-                HAL_Delay(100);
-            }
-        }
+        if (gw_pack_init(pack, pack_sz) != 0)
+            fatal_return_to_launcher("bad nxpk", "clear flash cache");
     }
 #endif
     odroid_overlay_draw_progress_bar("Cave Story data", 100);
