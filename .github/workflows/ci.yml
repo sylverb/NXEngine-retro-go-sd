@@ -62,9 +62,9 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           # unrar: Spanish Orden pack is .rar (p7zip cannot open all RAR variants)
+          # CJK atlas uses Fusion Pixel (auto-fetched by bake_cjk_atlas.py) — no Noto.
           sudo apt-get install -y --no-install-recommends \
-            libsdl1.2-dev pkg-config python3-pip p7zip-full unrar \
-            fonts-noto-cjk
+            libsdl1.2-dev pkg-config python3-pip p7zip-full unrar
           python3 -m pip install --user -r requirements.txt
 
       - name: Build GWHB binary (Docker)

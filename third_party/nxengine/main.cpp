@@ -115,7 +115,11 @@ bool freshstart;
 	//return 1;
 	
 	#ifdef CONFIG_DATA_EXTRACTOR
-	if (!settings->files_extracted)
+	/* G&W / pack-assets: game data lives in cavestory*.nxpk — never run the
+	 * Doukutsu.exe extractor (JP freeware CRCs ≠ Aeon Genesis expectations). */
+	if (gw_pack_ready())
+		settings->files_extracted = true;
+	else if (!settings->files_extracted)
 	{
 		if (extract_main())
 		{

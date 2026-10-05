@@ -400,21 +400,30 @@ size_t __wrap_core_fwrite(const void *ptr, size_t size, size_t nmemb, FILE *stre
 #endif /* !HOST_BUILD */
 #endif /* GW_PACK_STDIO_WRAP */
 
-/* Host / desktop: load cavestory.nxpk into malloc and gw_pack_init. */
+/* Host / desktop: load cavestory.nxpk (or a locale pack) into malloc. */
 int gw_pack_host_load(const char *path_hint)
 {
     static uint8_t *s_host_blob;
-    const char *cands[6];
-    int n = 0;
-
-    if (path_hint && path_hint[0])
-        cands[n++] = path_hint;
-    cands[n++] = "cavestory.nxpk";
-    cands[n++] = "CaveStory/cavestory.nxpk";
-    cands[n++] = GW_NXPK_PATH;
-    cands[n++] = NULL;
+    /* Runtime name first, then common pack-assets locale outputs. */
+    const char *cands[] = {
+        path_hint,
+        "cavestory.nxpk",
+        "CaveStory/cavestory.nxpk",
+        GW_NXPK_PATH,
+        "cavestory_ja.nxpk",
+        "CaveStory/cavestory_ja.nxpk",
+        "cavestory_ko.nxpk",
+        "CaveStory/cavestory_ko.nxpk",
+        "cavestory_fr.nxpk",
+        "CaveStory/cavestory_fr.nxpk",
+        "sd_content/homebrews/cavestory.nxpk",
+        "sd_content/homebrews/cavestory_ja.nxpk",
+        NULL,
+    };
 
     for (int i = 0; cands[i]; i++) {
+        if (!cands[i] || !cands[i][0])
+            continue;
         FILE *fp = fopen(cands[i], "rb");
         if (!fp)
             continue;
@@ -455,7 +464,7 @@ int gw_pack_host_load(const char *path_hint)
         }
         return 0;
     }
-    printf("gw_pack: host — no cavestory.nxpk found (run make pack-assets)\n");
+    printf("gw_pack: host — no cavestory*.nxpk found (run make pack-assets)\n");
     return -1;
 }
 

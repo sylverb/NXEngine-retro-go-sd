@@ -111,23 +111,110 @@ def normalize_rel(path: Path) -> str:
     return path.as_posix()
 
 
+def _looks_like_plaintext_tsc(text: str) -> bool:
+    """True if text is an unencrypted Cave Story script (has #events and <CMDs)."""
+    return "\x00" not in text and "#" in text and "<" in text
+
+
+# stage.dat packed record (matches third_party/nxengine/maprecord.h + map.cpp)
+_STAGE_REC = 73  # filename[32] + stagename[35] + 6×u8
+_STAGE_NAME_OFF = 32
+_STAGE_NAME_LEN = 35
+
+
+def convert_stage_dat_names_to_utf8(
+    data: bytes,
+    name_encoding: str = "cp932",
+    overrides: dict[str, str] | None = None,
+) -> bytes:
+    """Rewrite stagename[] fields from locale encoding (or overrides) to UTF-8.
+
+    CJK packs draw map names via utf8_next + cjkfont; Shift-JIS captions become
+    mojibake (e.g. スタート地点 → �X�^�[�g�n�_) if left unconverted.
+    """
+    if not data:
+        return data
+    n = data[0]
+    out = bytearray(data)
+    for i in range(n):
+        off = 1 + i * _STAGE_REC
+        if off + _STAGE_REC > len(out):
+            break
+        fname = bytes(out[off : off + 32]).split(b"\0")[0].decode("ascii", "ignore")
+        raw = bytes(
+            out[off + _STAGE_NAME_OFF : off + _STAGE_NAME_OFF + _STAGE_NAME_LEN]
+        ).split(b"\0")[0]
+        if not raw and not (overrides and fname in overrides):
+            continue
+
+        if overrides and fname in overrides:
+            text = overrides[fname]
+        else:
+            try:
+                text = raw.decode("utf-8")
+                # Already UTF-8 (re-pack) — keep.
+            except UnicodeDecodeError:
+                text = raw.decode(name_encoding, errors="replace")
+
+        enc = text.encode("utf-8")[: _STAGE_NAME_LEN - 1]
+        out[off + _STAGE_NAME_OFF : off + _STAGE_NAME_OFF + _STAGE_NAME_LEN] = (
+            b"\0" * _STAGE_NAME_LEN
+        )
+        out[off + _STAGE_NAME_OFF : off + _STAGE_NAME_OFF + len(enc)] = enc
+    return bytes(out)
+
+
+def load_ko_stage_name_overrides() -> dict[str, str]:
+    """Best-effort: Korean captions from cavestory.one script index (filename → name)."""
+    import html
+    import re
+    import urllib.request
+
+    url = "https://www.cavestory.one/game-info/tsc-script.php/ko"
+    req = urllib.request.Request(
+        url, headers={"User-Agent": "NXEngine-pack/1.0 (stage.dat names)"}
+    )
+    try:
+        page = urllib.request.urlopen(req, timeout=60).read().decode("utf-8", "replace")
+    except Exception as exc:
+        print(f"[CJK] ko stage-name fetch failed ({exc}); using JP→UTF-8 only")
+        return {}
+
+    # <a href=".../ko/start">Stage/Start.tsc (스타트 지점)</a>
+    overrides: dict[str, str] = {}
+    for m in re.finditer(
+        r">Stage/([A-Za-z0-9_]+)\.tsc\s*\(([^)]+)\)<", page
+    ):
+        fname, caption = m.group(1), html.unescape(m.group(2)).strip()
+        if caption:
+            overrides[fname] = caption
+    print(f"[CJK] ko stage-name overrides: {len(overrides)}")
+    return overrides
+
+
 def convert_tsc_to_utf8(data: bytes, encoding: str) -> bytes:
     """Decrypt → decode locale encoding → UTF-8 cleartext for NXPK.
 
-    Idempotent: if the decrypted payload is already valid UTF-8 (re-pack),
-    return it as-is — never re-decode as cp932/cp949 (that mangled kanji).
+    Idempotent: plaintext UTF-8 TSC (scraped / re-pack) is returned as-is.
+    Must NOT run the Doukutsu subtract-cipher on plaintext — that turns valid
+    UTF-8 Hangul/Kanji into garbage that still often decodes as UTF-8.
     """
+    # Already plaintext UTF-8 (e.g. cavestory.one scrape, prior pack rewrite).
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError:
+        text = None
+    if text is not None and _looks_like_plaintext_tsc(text):
+        return text.encode("utf-8")
+
     dec = tsc_decrypt_bytes(data)
     try:
         text = dec.decode("utf-8")
     except UnicodeDecodeError:
         text = None
-    if text is not None and "\x00" not in text:
-        # Heuristic: valid UTF-8 with CJK / non-ASCII already converted.
-        if encoding.lower() in ("utf-8", "utf8") or any(ord(c) > 0x7F for c in text):
-            return text.encode("utf-8")
-        # Pure ASCII also fine to keep.
+    if text is not None and _looks_like_plaintext_tsc(text):
         return text.encode("utf-8")
+
     text = dec.decode(encoding, errors="replace")
     return text.encode("utf-8")
 
@@ -200,6 +287,10 @@ def collect_entries(
             else:
                 data = tsc_decrypt_bytes(raw)
                 kind = "tsc-clear"
+        elif path.name.lower() == "stage.dat" and cjk:
+            # Already rewritten on disk in main(); pack the UTF-8 captions.
+            data = path.read_bytes()
+            kind = "stage-utf8"
         else:
             img = image_blob_for(path)
             if img is not None:
@@ -316,8 +407,8 @@ def main() -> int:
     text_encoding = loc.text_encoding if loc else "cp1252"
     cjk = bool(loc.cjk) if loc else False
 
-    # CJK: convert TSC → UTF-8 on disk first so the atlas scanner sees Unicode,
-    # bake cjkfont.dat, then pack (tsc entries use the converted UTF-8).
+    # CJK: convert TSC + stage.dat names → UTF-8 on disk first so the atlas
+    # scanner sees Unicode, bake cjkfont.dat, then pack.
     if cjk:
         print(f"[CJK] converting TSC {text_encoding} → UTF-8")
         for path in sorted(root.rglob("*.tsc")):
@@ -326,6 +417,31 @@ def main() -> int:
                 continue
             utf8 = convert_tsc_to_utf8(path.read_bytes(), text_encoding)
             path.write_bytes(tsc_encrypt_bytes(utf8))
+
+        # Base game stage.dat captions are Shift-JIS (JP 1.0.0.6).
+        stage_path = root / "stage.dat"
+        if stage_path.is_file():
+            overrides = (
+                load_ko_stage_name_overrides() if loc and loc.id == "ko" else None
+            )
+            converted = convert_stage_dat_names_to_utf8(
+                stage_path.read_bytes(),
+                name_encoding="cp932",
+                overrides=overrides,
+            )
+            stage_path.write_bytes(converted)
+            print(f"[CJK] stage.dat names → UTF-8 ({stage_path.stat().st_size} bytes)")
+
+        # Yes/No, AIR, title menu are bitmaps — rewrite for Korean.
+        if loc and loc.id == "ko":
+            import subprocess
+
+            ui = Path(__file__).resolve().parent / "localize_ui_sprites.py"
+            subprocess.run(
+                [sys.executable, str(ui), str(root), "--locale", "ko"],
+                check=True,
+            )
+
         bake_cjk_for_root(root, loc.id if loc else "ja")
 
     entries = collect_entries(

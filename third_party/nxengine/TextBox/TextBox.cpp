@@ -224,7 +224,11 @@ void TextBox::DrawTextBox()
 			
 			fLines[MSG_NLINES-1][0] = 0;
 			fCurLine = (MSG_NLINES - 2);
-			fCurLineLen = 1;
+			/* Byte length of the line that just scrolled into view.
+			 * Must be strlen (not 1): UTF-8 CJK glyphs are multi-byte, and
+			 * fCurLineLen=1 left a stray lead byte that hid the first glyph
+			 * (e.g. カ in「カズマだー。」). */
+			fCurLineLen = (int)strlen(fLines[fCurLine]);
 		}
 	}
 	else
@@ -326,6 +330,8 @@ void TextBox::AddNextChar(void)
 				fCWTail = peek;
 				fCurLineLen = 0;
 				fCurLine++;
+				if (fCurLine < MSG_NLINES)
+					fLines[fCurLine][0] = 0;
 				if (fCurLine >= MSG_NLINES - 1)
 					fScrolling = true;
 				if (line_at_once)
@@ -355,6 +361,8 @@ void TextBox::AddNextChar(void)
 			{
 				fCurLineLen = 0;
 				fCurLine++;
+				if (fCurLine < MSG_NLINES)
+					fLines[fCurLine][0] = 0;
 				if (fCurLine >= MSG_NLINES - 1)
 					fScrolling = true;
 			}

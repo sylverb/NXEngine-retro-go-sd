@@ -187,7 +187,7 @@ ci-assets:
 ci-assets-all:
 	$(V)$(ECHO) "[ CS ] CI asset pack (all locales)"
 	$(V)first=1; \
-	for loc in $$(python3 scripts/cavestory_locales.py --ids); do \
+	for loc in $$(python3 scripts/cavestory_locales.py --ids --ci); do \
 		$(ECHO) "[ CS ]" locale=$$loc; \
 		python3 scripts/prepare_cavestory_tree.py --locale $$loc; \
 		if [ $$first -eq 1 ]; then \
@@ -219,4 +219,4 @@ print-NXPK:
 	@python3 -c "import sys; sys.path.insert(0,'scripts'); from cavestory_locales import get_locale; \
 print('sd_content/homebrews/' + get_locale('$(LOCALE)').nxpk)"
 print-LOCALE_IDS:
-	@python3 scripts/cavestory_locales.py --ids
+	@python3 scripts/cavestory_locales.py --ids --ci

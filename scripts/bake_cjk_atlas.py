@@ -1,61 +1,112 @@
 #!/usr/bin/env python3
 """Bake a used-glyph CJK atlas (cjkfont.dat) for ja/ko Cave Story packs.
 
-Scans decrypted UTF-8 TSC (and optional extra strings), rasterizes glyphs with
-Pillow + a CJK TTF/OTF, writes the CJK1 binary format consumed by
+Scans UTF-8 (or legacy) TSC, rasterizes glyphs with Pillow, writes CJK1 for
 third_party/nxengine/graphics/cjkfont.cpp.
+
+Default font: TakWolf Fusion Pixel (12px monospaced, ja/ko ms.bitmap.ttf).
+True pixel strikes — render 1:1 at design size (no oversample). Noto CJK
+downsample was muddy at dialogue size; Fusion Pixel is designed for this.
 
 Format:
   magic u32 'CJK1' LE
   cell_w u8, cell_h u8, count u16
   count × { cp u32, offset u32, advance u8, pad[3] }  (sorted by cp)
-  glyph bitmaps at absolute offsets: 1bpp MSB-first, row-major, cell_w×cell_h bits
-
-Rasterization notes (legibility at ~12px on 320×240):
-  - Prefer Medium weight (Bold fills counters; Light drops strokes)
-  - Render at OVERSAMPLE× then box-downsample + threshold (keeps 漢/日 holes open)
-  - Fullwidth advance = cell (monospace grid) for stable dialogue layout
+  glyph bitmaps: 1bpp MSB-first, row-major, cell_w×cell_h bits
 """
 from __future__ import annotations
 
 import argparse
 import struct
 import sys
+import urllib.request
+import zipfile
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
 CJK_MAGIC = 0x314B4A43  # 'CJK1' LE
-# Fits MSG_LINE_SPACING (16) with a little padding; 10px was too muddy for kanji.
+# Fits MSG_LINE_SPACING (16). Fusion Pixel ships exact 10px / 12px strikes.
 DEFAULT_CELL = 12
-OVERSAMPLE = 4
-
-# Medium weight reads best at 12px after downsample. Bold/W6 fills counters;
-# light W3/Regular drops thin strokes. Prefer Medium, then Regular, then Bold.
-FONT_CANDIDATES_JA = (
-    "/usr/share/fonts/opentype/noto/NotoSansCJKjp-Medium.otf",
-    "/usr/share/fonts/opentype/noto/NotoSansCJK-Medium.ttc",
-    "/usr/share/fonts/opentype/noto/NotoSansCJKjp-Regular.otf",
-    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-    "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
-    "/System/Library/Fonts/ヒラギノ角ゴシック W5.ttc",
-    "/System/Library/Fonts/ヒラギノ角ゴシック W4.ttc",
-    "/System/Library/Fonts/ヒラギノ角ゴシック W6.ttc",
-    "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc",
-    "/usr/share/fonts/opentype/noto/NotoSansCJKjp-Bold.otf",
-    "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
-    "/Library/Fonts/Arial Unicode.ttf",
+FUSION_RELEASE = "2026.09.25"
+FUSION_BASE = (
+    f"https://github.com/TakWolf/fusion-pixel-font/releases/download/{FUSION_RELEASE}"
 )
 
-FONT_CANDIDATES_KO = (
+SCRIPT_DIR = Path(__file__).resolve().parent
+CACHE_DIR = SCRIPT_DIR / ".cache" / "fusion-pixel"
+
+
+def fusion_zip_url(cell: int) -> str:
+    return (
+        f"{FUSION_BASE}/fusion-pixel-font-{cell}px-monospaced-ms.bitmap.ttf-"
+        f"v{FUSION_RELEASE}.zip"
+    )
+
+
+def fusion_ttf_name(cell: int, locale: str) -> str:
+    loc = "ko" if locale == "ko" else "ja"
+    return f"fusion-pixel-{cell}px-monospaced-{loc}.ms.bitmap.ttf"
+
+
+def ensure_fusion_pixel(cell: int, locale: str) -> Path:
+    """Download Fusion Pixel zip into scripts/.cache if needed; return TTF path."""
+    if cell not in (10, 12):
+        raise SystemExit(
+            f"Fusion Pixel auto-fetch only supports cell 10 or 12 (got {cell}); "
+            "pass --font for other sizes"
+        )
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    ttf_name = fusion_ttf_name(cell, locale)
+    ttf_path = CACHE_DIR / ttf_name
+    if ttf_path.is_file():
+        return ttf_path
+
+    zip_name = (
+        f"fusion-pixel-font-{cell}px-monospaced-ms.bitmap.ttf-v{FUSION_RELEASE}.zip"
+    )
+    zip_path = CACHE_DIR / zip_name
+    url = fusion_zip_url(cell)
+    if not zip_path.is_file():
+        print(f"[CJK] downloading Fusion Pixel {cell}px → {zip_path.name}")
+        print(f"      {url}")
+        try:
+            urllib.request.urlretrieve(url, zip_path)
+        except Exception as exc:
+            if zip_path.is_file():
+                zip_path.unlink()
+            raise SystemExit(f"failed to download Fusion Pixel: {exc}") from exc
+
+    print(f"[CJK] extracting {ttf_name} from {zip_path.name}")
+    with zipfile.ZipFile(zip_path, "r") as zf:
+        try:
+            data = zf.read(ttf_name)
+        except KeyError as exc:
+            names = [n for n in zf.namelist() if n.endswith(".ttf")]
+            raise SystemExit(
+                f"{ttf_name} missing in zip; available: {names}"
+            ) from exc
+    ttf_path.write_bytes(data)
+    # Optional: keep OFL alongside cache for redistributors who inspect the dir.
+    try:
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            if "OFL.txt" in zf.namelist():
+                (CACHE_DIR / "OFL.txt").write_bytes(zf.read("OFL.txt"))
+    except OSError:
+        pass
+    return ttf_path
+
+
+# Fallback outline fonts (muddy at 12px — last resort only).
+FONT_FALLBACK_JA = (
+    "/usr/share/fonts/opentype/noto/NotoSansCJKjp-Medium.otf",
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Medium.ttc",
+    "/System/Library/Fonts/ヒラギノ角ゴシック W5.ttc",
+)
+FONT_FALLBACK_KO = (
     "/usr/share/fonts/opentype/noto/NotoSansCJKkr-Medium.otf",
     "/usr/share/fonts/opentype/noto/NotoSansCJK-Medium.ttc",
-    "/usr/share/fonts/opentype/noto/NotoSansCJKkr-Regular.otf",
-    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
     "/System/Library/Fonts/AppleSDGothicNeo.ttc",
-    "/System/Library/Fonts/ヒラギノ角ゴシック W5.ttc",
-    "/System/Library/Fonts/ヒラギノ角ゴシック W4.ttc",
-    "/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc",
 )
 
 
@@ -73,9 +124,37 @@ def tsc_decrypt_bytes(data: bytes) -> bytes:
 
 
 def decode_script_bytes(raw: bytes, encoding: str) -> str:
-    """Decrypt (Cave Story mid-byte key), then decode with locale encoding → str."""
     dec = tsc_decrypt_bytes(raw)
     return dec.decode(encoding, errors="replace")
+
+
+def collect_stage_dat_codepoints(path: Path, encoding: str) -> set[int]:
+    """Collect non-ASCII codepoints from stage.dat map captions."""
+    cps: set[int] = set()
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return cps
+    if not data:
+        return cps
+    rec, name_off, name_len = 73, 32, 35
+    n = data[0]
+    for i in range(n):
+        off = 1 + i * rec
+        if off + rec > len(data):
+            break
+        raw = data[off + name_off : off + name_off + name_len].split(b"\0")[0]
+        if not raw:
+            continue
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            text = raw.decode(encoding, errors="replace")
+        for ch in text:
+            o = ord(ch)
+            if o >= 0x80:
+                cps.add(o)
+    return cps
 
 
 def collect_codepoints(root: Path, encoding: str) -> set[int]:
@@ -103,28 +182,55 @@ def collect_codepoints(root: Path, encoding: str) -> set[int]:
             if o >= 0x80:
                 cps.add(o)
 
+    # Map-name banner (center screen) uses stage.dat captions.
+    for name in ("stage.dat", "Stage.dat"):
+        p = root / name
+        if p.is_file():
+            cps |= collect_stage_dat_codepoints(p, encoding)
+            break
+
     return cps
 
 
-def find_font(explicit: Path | None, locale: str) -> Path:
+def is_pixel_font(font_path: Path) -> bool:
+    n = font_path.name.lower()
+    return "fusion-pixel" in n or "ms.bitmap" in n or n.endswith(".bdf")
+
+
+def find_font(
+    explicit: Path | None, locale: str, cell: int, *, allow_fetch: bool = True
+) -> Path:
     if explicit is not None:
         if not explicit.is_file():
             raise SystemExit(f"font not found: {explicit}")
         return explicit
 
-    candidates = FONT_CANDIDATES_KO if locale == "ko" else FONT_CANDIDATES_JA
+    cached = CACHE_DIR / fusion_ttf_name(cell, locale)
+    if cached.is_file():
+        return cached
+
+    if allow_fetch:
+        try:
+            return ensure_fusion_pixel(cell, locale)
+        except SystemExit as exc:
+            print(
+                f"[CJK] Fusion Pixel unavailable ({exc}); trying outline fallbacks",
+                file=sys.stderr,
+            )
+
+    candidates = FONT_FALLBACK_KO if locale == "ko" else FONT_FALLBACK_JA
     for p in candidates:
         path = Path(p)
         if path.is_file():
             return path
 
     raise SystemExit(
-        "no CJK font found; install fonts-noto-cjk (apt) or pass --font PATH"
+        "no CJK font found. Need network to fetch Fusion Pixel, or pass --font PATH.\n"
+        f"  expected cache: {CACHE_DIR / fusion_ttf_name(cell, locale)}"
     )
 
 
 def _load_font(font_path: Path, px: int) -> ImageFont.FreeTypeFont:
-    """Load TTF/OTF/TTC; try several face indices for Noto TTC collections."""
     last: OSError | None = None
     for index in (0, 1, 2, 3, 4):
         try:
@@ -136,13 +242,40 @@ def _load_font(font_path: Path, px: int) -> ImageFont.FreeTypeFont:
     raise last
 
 
-def rasterize_glyph(
-    font_path: Path, cp: int, cell: int, scale: int = OVERSAMPLE
+def rasterize_glyph_pixel(font_path: Path, cp: int, cell: int) -> tuple[bytes, int]:
+    """1:1 pixel strike (Fusion Pixel). Must use font size == design size."""
+    ch = chr(cp)
+    font = _load_font(font_path, px=cell)
+    img = Image.new("L", (cell, cell), 0)
+    draw = ImageDraw.Draw(img)
+    try:
+        bbox = draw.textbbox((0, 0), ch, font=font)
+        tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+        if tw <= 0 or th <= 0:
+            # Missing glyph / wrong size — leave blank.
+            return bytes((cell * cell + 7) // 8), cell
+        x = max(0, (cell - tw) // 2 - bbox[0])
+        y = max(0, (cell - th) // 2 - bbox[1])
+        draw.text((x, y), ch, fill=255, font=font)
+    except Exception:
+        return bytes((cell * cell + 7) // 8), cell
+
+    px = img.load()
+    bits = bytearray((cell * cell + 7) // 8)
+    for y in range(cell):
+        for x in range(cell):
+            if px[x, y] >= 128:
+                bit = y * cell + x
+                bits[bit >> 3] |= 0x80 >> (bit & 7)
+    return bytes(bits), cell
+
+
+def rasterize_glyph_outline(
+    font_path: Path, cp: int, cell: int, scale: int = 4
 ) -> tuple[bytes, int]:
-    """Return (1bpp packed bitmap cell×cell, advance_px)."""
+    """Outline font (Noto…): oversample then box-downsample (legacy path)."""
     ch = chr(cp)
     big_cell = cell * scale
-    # Slightly under cell so glyphs don't clip after downsample.
     font = _load_font(font_path, px=big_cell - scale)
 
     img = Image.new("L", (big_cell, big_cell), 0)
@@ -150,7 +283,6 @@ def rasterize_glyph(
     try:
         bbox = draw.textbbox((0, 0), ch, font=font)
         tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
-        # Center horizontally; slight upward bias vs Latin smalfont band.
         x = max(0, (big_cell - tw) // 2 - bbox[0])
         y = max(0, (big_cell - th) // 2 - bbox[1] - scale // 2)
         draw.text((x, y), ch, fill=255, font=font)
@@ -163,8 +295,6 @@ def rasterize_glyph(
         y = max(0, (big_cell - mh) // 2)
         img.paste(glyph, (x, y))
 
-    # Box/average downsample keeps open counters (holes) in 漢/日/etc.
-    # Max-pool filled them solid. Threshold a bit above mid for clean edges.
     try:
         resample = Image.Resampling.BOX
     except AttributeError:
@@ -175,26 +305,29 @@ def rasterize_glyph(
     bits = bytearray((cell * cell + 7) // 8)
     for y in range(cell):
         for x in range(cell):
-            # ~128 keeps counters open; much higher drops thin bars (口 bottom).
             if px[x, y] >= 128:
                 bit = y * cell + x
                 bits[bit >> 3] |= 0x80 >> (bit & 7)
+    return bytes(bits), cell
 
-    # Fullwidth grid: keep dialogue columns stable (classic JP doukutsu feel).
-    adv = cell
-    return bytes(bits), adv
 
 def bake(codepoints: set[int], font_path: Path, cell: int, out: Path) -> None:
     ordered = sorted(codepoints)
+    pixel = is_pixel_font(font_path)
     toc: list[tuple[int, int, int, bytes]] = []
     header_size = 8
     toc_size = len(ordered) * 12
     offset = (header_size + toc_size + 3) & ~3
 
-    for cp in ordered:
-        bits, adv = rasterize_glyph(font_path, cp, cell)
+    for i, cp in enumerate(ordered):
+        if pixel:
+            bits, adv = rasterize_glyph_pixel(font_path, cp, cell)
+        else:
+            bits, adv = rasterize_glyph_outline(font_path, cp, cell)
         toc.append((cp, offset, adv, bits))
         offset += len(bits)
+        if (i + 1) % 200 == 0:
+            print(f"  … {i + 1}/{len(ordered)} glyphs")
 
     body = bytearray(offset)
     struct.pack_into("<IBBH", body, 0, CJK_MAGIC, cell, cell, len(ordered))
@@ -205,42 +338,49 @@ def bake(codepoints: set[int], font_path: Path, cell: int, out: Path) -> None:
 
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_bytes(bytes(body))
+    mode = "pixel-1:1" if pixel else "outline-oversample"
     print(
         f"wrote {out} — {len(ordered)} glyphs, cell={cell}px, "
         f"{len(body)} bytes ({len(body) / 1024:.1f} KiB) font={font_path.name} "
-        f"oversample={OVERSAMPLE}x"
+        f"mode={mode}"
     )
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("root", nargs="?", default="CaveStory", type=Path)
-    ap.add_argument(
-        "-o",
-        "--output",
-        type=Path,
-        default=None,
-        help="default: <root>/cjkfont.dat",
-    )
+    ap.add_argument("-o", "--output", type=Path, default=None)
     ap.add_argument(
         "--encoding",
         default=None,
         help="source TSC encoding before UTF-8 rewrite (cp932/cp949)",
     )
-    ap.add_argument("--locale", default="ja", help="ja|ko (font preference)")
-    ap.add_argument("--font", type=Path, default=None)
-    ap.add_argument("--cell", type=int, default=DEFAULT_CELL)
+    ap.add_argument("--locale", default="ja", help="ja|ko (Fusion Pixel face)")
+    ap.add_argument("--font", type=Path, default=None, help="override TTF/OTF path")
+    ap.add_argument(
+        "--cell",
+        type=int,
+        default=DEFAULT_CELL,
+        help="glyph cell size (10 or 12 for Fusion Pixel; default 12)",
+    )
     ap.add_argument(
         "--codepoints-from-utf8",
         action="store_true",
         help="treat .tsc as already UTF-8 (post-conversion)",
     )
+    ap.add_argument(
+        "--no-fetch",
+        action="store_true",
+        help="do not download Fusion Pixel; only use --font or local cache/fallbacks",
+    )
     args = ap.parse_args()
 
     enc = args.encoding
     if enc is None:
-        enc = "utf-8" if args.codepoints_from_utf8 else (
-            "cp949" if args.locale == "ko" else "cp932"
+        enc = (
+            "utf-8"
+            if args.codepoints_from_utf8
+            else ("cp949" if args.locale == "ko" else "cp932")
         )
 
     root = args.root
@@ -254,7 +394,9 @@ def main() -> int:
         return 1
     print(f"collected {len(cps)} unique non-ASCII codepoints (encoding={enc})")
 
-    font_path = find_font(args.font, args.locale)
+    font_path = find_font(
+        args.font, args.locale, args.cell, allow_fetch=not args.no_fetch
+    )
     print(f"using font: {font_path}")
     out = args.output or (root / "cjkfont.dat")
     bake(cps, font_path, args.cell, out)

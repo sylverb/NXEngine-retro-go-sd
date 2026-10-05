@@ -13,9 +13,10 @@ at boot; assets are XIP lookups (no per-file flash writes).
 In-game text language comes from the **`.nxpk` pack** you install. Catalogued
 locales: **en, de, es, fi, fr, it, nl, pt** (CP1252) plus **ja** (Shift-JIS) and
 **ko** (CP949). CJK packs convert scripts to UTF-8 at pack time and ship a
-used-glyph `cjkfont.dat` atlas (baked with Noto CJK — not redistributed as a
-TTF). Cyrillic / Turkish are still skipped. Tagged releases ship one SD zip per
-language.
+used-glyph `cjkfont.dat` atlas baked from
+[Fusion Pixel](https://github.com/TakWolf/fusion-pixel-font) 12px monospaced
+(auto-downloaded at pack time — OFL, not vendored). Cyrillic / Turkish are
+still skipped. Tagged releases ship one SD zip per language.
 
 ## Build
 
@@ -45,26 +46,19 @@ make pack-assets
 #### Other languages
 
 Fan translations are usually a `data/` overlay (scripts + some images). Western
-overlays use the English `Doukutsu.exe` extract for music/SFX; **ko** overlays
-the Korean `data/` onto the **Japanese** base. Needs `p7zip` for `.7z` locales,
-`unrar` (or macOS `bsdtar`) for Spanish `.rar`, and **Noto CJK** fonts to bake
-`ja`/`ko` atlases (`fonts-noto-cjk` on apt; CI installs it).
-
-**Korean note:** `cavestory_k.7z` on cavestory.one is a Windows PatchProgram, not
-a `data/` tree, so `ko` is skipped in `ci-assets-all`. To pack Korean locally,
-apply that patcher to JP 1.0.0.6, zip the resulting `data/`, then:
+overlays use the English `Doukutsu.exe` extract for music/SFX; **ko** uses the
+**Japanese** base and pulls Korean TSC (UTF-8) from cavestory.one’s script
+pages (`scripts/fetch_ko_tsc_overlay.py`) because the published `cavestory_k.7z`
+is a Windows PatchProgram, not a `data/` tree. Needs `p7zip` for `.7z` locales,
+`unrar` (or macOS `bsdtar`) for Spanish `.rar`. CJK atlases use Fusion Pixel
+(fetched into `scripts/.cache/fusion-pixel/` on first `pack-assets` for `ja`/`ko`).
 
 ```bash
-python3 scripts/prepare_cavestory_tree.py --locale ko --archive korean_data.zip
-make host && ./CaveStory_host --ci-prepare
-make pack-assets LOCALE=ko
-```
-
-```bash
-make list-locales              # en de … ja ko … (ko marked no-ci)
+make list-locales              # en de … ja ko …
 make ci-assets LOCALE=de       # one locale
 make ci-assets LOCALE=ja       # Japanese (UTF-8 + cjkfont.dat)
-make ci-assets-all             # every CI locale (skips ko)
+make ci-assets LOCALE=ko       # Korean (JA base + web TSC + UI sprites)
+make ci-assets-all             # every CI locale (includes ko)
 make pack-assets-fr            # shortcut → cavestory_fr.nxpk
 ```
 

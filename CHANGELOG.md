@@ -7,7 +7,11 @@ Release tags must match a section heading exactly (for example `v1.0.0`).
 
 ### Added
 
-- Nothing.
+- Japanese (`ja`) locale packs: Shift-JIS → UTF-8 TSC, used-glyph `cjkfont.dat`
+  atlas from Fusion Pixel 12px monospaced (pixel-perfect bake).
+- Korean (`ko`) packs in CI: Japanese Doukutsu base + TSC scraped from
+  cavestory.one, Fusion Pixel atlas, localized Yes/No/AIR/menu bitmaps, and the
+  European ESC pause prompt (KO zip has no hand-drawn sprite).
 
 ### Fixed
 

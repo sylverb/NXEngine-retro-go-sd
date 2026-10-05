@@ -9,8 +9,10 @@ Sources: https://www.cavestory.one/download/cave-story.php
 
 CI packs every locale here (`make ci-assets-all`). Prefer zip/7z overlays;
 `.rar` works when `bsdtar`/`unrar`/`unar` is available (CI installs unrar).
-CJK (ja/ko): pack-time UTF-8 + used-glyph cjkfont.dat atlas (Noto CJK).
-Cyrillic / CP1254 still skipped (no font path yet).
+CJK (ja/ko): pack-time UTF-8 + used-glyph cjkfont.dat from Fusion Pixel
+12px monospaced (TakWolf; auto-fetched at bake). Korean TSC come from
+cavestory.one’s script pages (PatchProgram zip is not CI-usable).
+Cyrillic / CP1254 skipped.
 """
 from __future__ import annotations
 
@@ -99,25 +101,24 @@ LOCALES: dict[str, Locale] = {
         kind="full",
         text_encoding="cp932",
         cjk=True,
-        notes="Shift-JIS TSC → UTF-8 + cjkfont.dat (Noto CJK used-glyph atlas).",
+        notes="Shift-JIS TSC → UTF-8 + cjkfont.dat (Fusion Pixel 12px).",
     ),
     "ko": Locale(
         id="ko",
         name="Korean (Anonymous / romhacking 2147)",
+        # Published .7z is a Windows PatchProgram — prepare scrapes UTF-8 TSC
+        # from cavestory.one instead (see scripts/fetch_ko_tsc_overlay.py).
         url=f"{BASE_URL}/cavestory_k.7z",
         nxpk="cavestory_ko.nxpk",
         kind="overlay",
-        text_encoding="cp949",
+        text_encoding="utf-8",
         base_locale="ja",
         cjk=True,
-        ci=False,
+        ci=True,
         notes=(
-            "Overlay on Japanese base; CP949 → UTF-8 + cjkfont.dat. "
-            "cavestory.one ships a Windows PatchProgram (not a data tree) — "
-            "apply it to JP 1.0.0.6, zip the resulting data/, then "
-            "`make ci-assets LOCALE=ko` with "
-            "`python3 scripts/prepare_cavestory_tree.py --locale ko --archive that.zip`. "
-            "Skipped in ci-assets-all until a plain overlay URL exists."
+            "JA Doukutsu base + Korean TSC from cavestory.one script pages "
+            "(UTF-8); pack bakes Fusion Pixel cjkfont.dat + KO UI bitmaps. "
+            "Optional `--archive` with a real data/ tree still works."
         ),
     ),
     "nl": Locale(

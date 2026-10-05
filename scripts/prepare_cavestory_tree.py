@@ -12,11 +12,16 @@ Fan translations (`--locale fr`, …) are usually data overlays:
   2. Download the locale archive and merge its `data/` (and siblings) over
      CaveStory/, keeping Doukutsu.exe + extracted music/SFX assets
 
+Korean (`--locale ko`): Japanese base + UTF-8 TSC scraped from cavestory.one
+(the published `cavestory_k.7z` is a Windows PatchProgram, not a data tree).
+Pass `--archive` with a real `data/` zip to skip the web scrape.
+
 Audio caches (drum.pcm / sndcache.pcm): ./CaveStory_host --ci-prepare
 
 Usage:
   python3 scripts/prepare_cavestory_tree.py
   python3 scripts/prepare_cavestory_tree.py --locale fr
+  python3 scripts/prepare_cavestory_tree.py --locale ko
   python3 scripts/prepare_cavestory_tree.py --list-locales
 """
 from __future__ import annotations
@@ -45,6 +50,7 @@ from extract_doukutsu import (  # noqa: E402
     extract_pxt,
     extract_stages,
 )
+from fetch_ko_tsc_overlay import apply_ko_tsc_overlay  # noqa: E402
 
 
 def download(url: str, dest: Path) -> None:
@@ -357,6 +363,45 @@ def prepare_overlay_locale(
             tmp_dir.cleanup()
 
 
+def prepare_korean(
+    outdir: Path,
+    archive: Path | None,
+    keep: bool,
+) -> Path:
+    """Japanese Doukutsu base + Korean TSC (web scrape or real data archive)."""
+    base = get_locale("ja")
+    tree = prepare_english(
+        outdir, archive=None, url=base.url, keep=keep, check_crc=False
+    )
+
+    if archive is not None:
+        # Optional: user-supplied `data/` tree (e.g. after applying the Windows
+        # patcher). Fall back to the web scrape if the archive is the PatchProgram.
+        arch = archive.resolve()
+        if not arch.is_file():
+            raise SystemExit(f"locale archive not found: {arch}")
+        extract_root = outdir / "_extract_locale"
+        if extract_root.exists():
+            shutil.rmtree(extract_root)
+        extract_archive(arch, extract_root)
+        try:
+            overlay = find_data_root(extract_root)
+        except SystemExit:
+            print(
+                "[ko] archive has no data/Head.tsc — falling back to "
+                "cavestory.one TSC scrape"
+            )
+            shutil.rmtree(extract_root, ignore_errors=True)
+            apply_ko_tsc_overlay(tree)
+            return tree
+        merge_overlay(tree, overlay)
+        shutil.rmtree(extract_root, ignore_errors=True)
+        return tree
+
+    apply_ko_tsc_overlay(tree)
+    return tree
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument(
@@ -410,7 +455,10 @@ def main() -> int:
     # EN AGTP CRCs are authoritative; JP freeware differs in credit BMPs.
     check_crc = not loc.cjk and loc.id != "ja"
 
-    if loc.kind == "full":
+    if loc.id == "ko":
+        # Default: JA base + cavestory.one UTF-8 TSC (PatchProgram is unusable).
+        tree = prepare_korean(outdir, args.archive, args.keep_zip)
+    elif loc.kind == "full":
         tree = prepare_english(
             outdir, args.archive, url, args.keep_zip, check_crc=check_crc
         )

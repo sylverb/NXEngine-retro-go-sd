@@ -12,6 +12,7 @@
 host_saves/
 .DS_Store
 __pycache__/
+scripts/.cache/
 # Freeware Cave Story tree (copyrighted — keep local only)
 /CaveStory/
 
