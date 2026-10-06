@@ -30,8 +30,8 @@ AIR_YS = (72, 80)
 # ESC pause prompt (SPR_RESETPROMPT) — hand-drawn in stock TextBox.pbm
 RESETPROMPT = dict(x=0, y=128, w=208, h=16)
 TITLE = dict(x=0, y=0, w=140, h=32)
-MENU = dict(x=140, w=40, h=16)
-# JP 「・」 sits in the leftmost columns of each 40×16 menu frame.
+MENU = dict(x=140, w=52, h=16)
+# JP 「・」 sits in the leftmost columns of each menu frame.
 MENU_BULLET_COLS = 4
 
 COL_WHITE = (255, 255, 255, 255)
