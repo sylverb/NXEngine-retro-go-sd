@@ -8,12 +8,14 @@
 
 ### Fixed
 
-- Japanese title menu: widen `SPR_MENU` from 40→52 px so `最初から` /
-  `続きから` keep the final `ら` (was clipped by the English frame size).
+- Japanese title menu: fix missing final `ら` (was clipped by the English frame size).
 
 ### Changed
 
-- Nothing.
+- Controls: GAME release = inventory (unless GAME+Left/Right was used for
+  weapons), TIME = map (Escape removed — double-press used to hard-fault).
+  Zelda X/Y = prev/next weapon; Mario uses GAME+Left / GAME+Right. Inventory
+  KEYDOWN stays sticky so re-entrant pad polls still reach `justpushed`.
 
 ### Install
 

@@ -19,6 +19,22 @@ used-glyph `cjkfont.dat` atlas from
 (auto-downloaded at pack time — OFL, not vendored). Cyrillic / Turkish are
 still skipped. Tagged releases ship one SD zip per language.
 
+## Controls
+
+| Button | Action |
+| --- | --- |
+| D-pad | Move / look / doors |
+| **B** | Jump |
+| **A** | Fire |
+| **GAME** (release) | Inventory (if ←/→ was not used while held) |
+| **GAME** + ← / → | Previous / next weapon |
+| **TIME** | Map (when you have the item) |
+| **X** / **Y** | Previous / next weapon (Zelda unit) |
+| **PAUSE** | Retro-Go menu only |
+
+On the Mario G&W (no X/Y), use **GAME** + Left/Right for weapons. Escape is
+not mapped (a second press used to hard-fault the GWHB).
+
 ## Build
 
 ```bash

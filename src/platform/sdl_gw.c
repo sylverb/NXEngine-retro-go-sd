@@ -181,26 +181,105 @@ static void gw_menu_repaint(void)
 
 static void poll_pad_to_keys_from(const odroid_gamepad_state_t *j)
 {
+    /*
+     * G&W pad → Cave Story (PC defaults Z/X/A/S/Q/W):
+     *
+     *   D-pad     move / look / doors
+     *   B         jump          (Z)
+     *   A         fire          (X)
+     *   GAME      inventory     (Q)  — or GAME+Left/Right = prev/next weapon
+     *   TIME      map           (W)
+     *   X / Y     prev / next weapon (Zelda unit; Mario has no X/Y)
+     *   PAUSE/SET Retro-Go menu only (not forwarded)
+     *
+     * Escape is intentionally not mapped: two presses used to exit the
+     * engine and hard-fault the GWHB.
+     *
+     * Inventory fires on GAME *release* if Left/Right was never pressed while
+     * GAME was down (so GAME+dir weapon switch can be held comfortably).
+     * The KEYDOWN must stay sticky across re-entrant pad polls: SDL_PollEvent /
+     * SDL_Delay call back in here, and a 1–2 call pulse collapses to
+     * KEYDOWN+KEYUP inside one input_poll so justpushed() never sees it.
+     */
     uint32_t cur = 0;
 #define BIT(b) (1u << (b))
-    if (j->values[ODROID_INPUT_LEFT])   cur |= BIT(0);
-    if (j->values[ODROID_INPUT_RIGHT])  cur |= BIT(1);
-    if (j->values[ODROID_INPUT_UP])     cur |= BIT(2);
-    if (j->values[ODROID_INPUT_DOWN])   cur |= BIT(3);
-    if (j->values[ODROID_INPUT_A])      cur |= BIT(4);
-    if (j->values[ODROID_INPUT_B])      cur |= BIT(5);
-    if (j->values[ODROID_INPUT_START])  cur |= BIT(6);  /* GAME */
-    if (j->values[ODROID_INPUT_SELECT]) cur |= BIT(7);  /* TIME */
-    if (j->values[ODROID_INPUT_X])      cur |= BIT(8);
-    if (j->values[ODROID_INPUT_Y])      cur |= BIT(9);
-    /* ODROID_INPUT_VOLUME = PAUSE/SET — Retro-Go menu only. */
+    enum {
+        K_LEFT = 0,
+        K_RIGHT,
+        K_UP,
+        K_DOWN,
+        K_FIRE,
+        K_JUMP,
+        K_INV,
+        K_MAP,
+        K_PREVWPN,
+        K_NEXTWPN,
+        K_COUNT
+    };
+    enum { INV_STICKY_MS = 150u };
 
-    static const SDLKey map[] = {
+    const int left = j->values[ODROID_INPUT_LEFT];
+    const int right = j->values[ODROID_INPUT_RIGHT];
+    const int up = j->values[ODROID_INPUT_UP];
+    const int down = j->values[ODROID_INPUT_DOWN];
+    const int a = j->values[ODROID_INPUT_A];
+    const int b = j->values[ODROID_INPUT_B];
+    const int game = j->values[ODROID_INPUT_START];
+    const int time = j->values[ODROID_INPUT_SELECT];
+    const int btn_x = j->values[ODROID_INPUT_X];
+    const int btn_y = j->values[ODROID_INPUT_Y];
+    const uint32_t now = HAL_GetTick();
+
+    static int game_was_down;
+    static int game_used_as_mod;
+    static uint32_t inv_until; /* sticky inventory KEYDOWN until this tick */
+
+    int move_left = left;
+    int move_right = right;
+    int prev_wpn = btn_x;
+    int next_wpn = btn_y;
+
+    if (game && !game_was_down)
+        game_used_as_mod = 0;
+
+    /* Mario (no X/Y): GAME + Left/Right switches weapons (no timing race). */
+    if (game) {
+        if (left) {
+            prev_wpn = 1;
+            move_left = 0;
+            game_used_as_mod = 1;
+        }
+        if (right) {
+            next_wpn = 1;
+            move_right = 0;
+            game_used_as_mod = 1;
+        }
+    }
+
+    /* GAME release without any L/R during the hold → inventory. */
+    if (!game && game_was_down && !game_used_as_mod)
+        inv_until = now + INV_STICKY_MS;
+    game_was_down = game;
+
+    int inv = ((int32_t)(now - inv_until) < 0);
+
+    if (move_left)  cur |= BIT(K_LEFT);
+    if (move_right) cur |= BIT(K_RIGHT);
+    if (up)         cur |= BIT(K_UP);
+    if (down)       cur |= BIT(K_DOWN);
+    if (a)          cur |= BIT(K_FIRE);
+    if (b)          cur |= BIT(K_JUMP);
+    if (inv)        cur |= BIT(K_INV);
+    if (time)       cur |= BIT(K_MAP);
+    if (prev_wpn)   cur |= BIT(K_PREVWPN);
+    if (next_wpn)   cur |= BIT(K_NEXTWPN);
+
+    static const SDLKey map[K_COUNT] = {
         SDLK_LEFT, SDLK_RIGHT, SDLK_UP, SDLK_DOWN,
-        SDLK_x, SDLK_z, SDLK_RETURN, SDLK_ESCAPE,
+        SDLK_x, SDLK_z, SDLK_q, SDLK_w,
         SDLK_a, SDLK_s
     };
-    for (unsigned i = 0; i < sizeof(map) / sizeof(map[0]); i++) {
+    for (unsigned i = 0; i < K_COUNT; i++) {
         uint32_t m = BIT(i);
         if ((cur & m) && !(s_pad_prev & m))
             push_key(SDL_KEYDOWN, map[i]);
